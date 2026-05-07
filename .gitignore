@@ -1,0 +1,81 @@
+# ==========================================
+# BandAI .gitignore
+# ==========================================
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# BandAI Specific: Data, Vector DB, & Outputs
+# Ignore sensitive SME documents, OCR scans, and RAG ingestions
+data/company_profiles/*
+!data/company_profiles/.gitkeep
+data/raw_tenders/*
+!data/raw_tenders/.gitkeep
+
+# Ignore locally generated proposals to prevent clutter
+outputs/
+generated_proposals/
+*.pdf
+*.docx
+
+# Ignore local Qdrant/Redis vector database storage
+qdrant_storage/
+qdrant_data/
+redis_data/
+
+# Logs
+*.log
+crewai.log
+agent_debate_traces/
+
+# Python Standard
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
