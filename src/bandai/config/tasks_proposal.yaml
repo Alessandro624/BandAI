@@ -1,0 +1,82 @@
+dept_bid_task:
+  description: >
+    You represent the {dept_name} department.
+
+    TENDER: {contract_summary}
+
+    Submit your department's bid: 1. headline_capability : One sentence - your
+    #1 relevant capability. 2. evidence            : Up to 5 bullet points
+    (certs, case studies, KPIs). 3. differentiators     : 2-3 unique qualifying
+    factors. 4. suggested_section   : Proposal section this content belongs to
+       (e.g. "Approccio metodologico", "Infrastruttura tecnica",
+       "Governance e project management", "Sicurezza informatica").
+    5. relevance_score     : 0.0-1.0 - how relevant is YOUR dept to THIS tender.
+    6. evidence_quality_score : 0.0-1.0 quality of your evidence.
+       Guide: 1.0 = verifiable certs + signed case studies + quantified KPIs;
+              0.5 = partial evidence; 0.0 = unsubstantiated claims only.
+       Be honest - the Auctioneer penalises inflated scores.
+    7. word_budget         : Words you need (min 100, max 500).
+
+    Return a JSON object matching the DepartmentBid schema.
+  expected_output: >
+    A valid JSON object: department, headline_capability, evidence,
+    differentiators, suggested_section, relevance_score, evidence_quality_score,
+    word_budget.
+  agent: department_rep
+
+auction_task:
+  description: >
+    You have received all department bids (in context).
+
+    TENDER: {contract_summary}
+
+    TOTAL WORD BUDGET: {total_word_limit} words
+
+    STEP 1 - SCORE each bid with this fixed formula (do NOT alter weights):
+      composite = (relevance_score x 0.50)
+                + (evidence_quality_score x 0.35)
+                + (section_coverage_bonus x 0.15)
+
+      section_coverage_bonus: 1.0 if this bid fills a section not yet covered
+      by any higher-scoring accepted bid; 0.0 if already covered.
+
+    STEP 2 - RANK bids by composite_score descending.
+
+    STEP 3 - SELECT greedily: accept bids in rank order until word budget
+    reached.
+
+    STEP 4 - DECONFLICT: if two accepted bids claim the same suggested_section,
+    keep the higher-scoring one; free the word budget and re-select.
+
+    STEP 5 - SCALE winning word_budgets proportionally if total exceeds limit.
+
+    STEP 6 - REPORT rejected_bids with reason: low_score |
+    section_already_covered | word_budget_exceeded.
+
+    Return a JSON object matching the AuctionResult schema.
+  expected_output: >
+    A valid JSON object: winning_bids, rejected_bids, section_allocation,
+    total_word_budget, rationale.
+  agent: auctioneer
+
+proposal_task:
+  description: >
+    You have the AuctionResult in context.
+
+    Write a complete Italian offerta tecnica for: {contract_summary}
+
+    Instructions: 1. Write an executive_summary (≤150 words) in Italian. 2. For
+    each winning bid's suggested_section, write the full section content
+       using that department's evidence and differentiators.
+       Respect each section's allocated word_budget.
+    3. Add a "Dichiarazioni di Conformità" section listing all relevant
+       compliance declarations (ISO certifications, D.Lgs. 36/2023 art. 94…).
+    4. Use clear headings (##), bullet points for evidence.
+       Avoid marketing clichés - write for PA evaluators.
+    5. Return a FinalProposal JSON object with all sections.
+
+    Company: {company_name}
+  expected_output: >
+    A valid JSON object: tender_ref, executive_summary, sections, appendices,
+    compliance_declarations, word_count, quality_score.
+  agent: proposal_architect
