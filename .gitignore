@@ -12,6 +12,7 @@ venv/
 .venv/
 env/
 ENV/
+uv.lock
 
 # BandAI Specific: Data, Vector DB, & Outputs
 # Ignore sensitive SME documents, OCR scans, and RAG ingestions
