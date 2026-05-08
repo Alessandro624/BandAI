@@ -5,7 +5,7 @@ import random
 from typing import Type
 
 from crewai.tools import BaseTool  # type: ignore
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class CrawlerInput(BaseModel):
@@ -13,6 +13,16 @@ class CrawlerInput(BaseModel):
     base_url: str = Field(..., description="Entry URL of the portal to crawl.")
     keywords: list[str] = Field(..., description="List of keywords to search for in the portal.")
     max_results: int = Field(10, description="Maximum number of contracts to return.")
+
+    @field_validator("keywords", mode="before")
+    @classmethod
+    def parse_keywords(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return [v]
+        return v
 
 
 class ContractLookupInput(BaseModel):
@@ -61,7 +71,7 @@ class TenderCrawlerTool(BaseTool):
 
 
 class ContractDetailTool(BaseTool):
-    """Fetches full metadata of a single tender by CIG from the ANAC open API."""
+    """Fetches full metadata of a single tender by Contract ID from the ANAC open API."""
 
     name: str = "ContractDetailTool"
     description: str = (

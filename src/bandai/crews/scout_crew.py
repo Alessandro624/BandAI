@@ -95,7 +95,7 @@ class ScoutCrew:
             expected_output=res_task_cfg["expected_output"],
             agent=resolution_agent,
             context=crawl_tasks,  # waits for all async crawlers
-            output_pydantic=ResolvedContract,
+            output_pydantic=list[ResolvedContract],
         )
 
         preference_cfg = ac["preference_filter_agent"]
