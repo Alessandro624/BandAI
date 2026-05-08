@@ -4,6 +4,7 @@ import json
 import logging
 import sys
 import warnings
+import re
 
 from datetime import datetime
 from pathlib import Path
@@ -80,6 +81,17 @@ def _is_implicit_no_go(text: str) -> bool:
     return any(kw in lower for kw in IMPLICIT_NO_GO_KEYWORDS)
 
 
+def _extract_json_array(raw: str) -> list:
+    """
+    Attempt to extract a JSON array from the raw string.
+    Handles cases where the LLM might return a single object or a list of objects.
+    """
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    if not match:
+        raise ValueError("No JSON array found in the input.")
+    return json.loads(match.group())
+
+
 def run_scouting() -> list[dict]:
     log.info("=== PHASE 1: SCOUTING ===")
     print("\nDescribe your preferences for this scouting session.")
@@ -91,11 +103,13 @@ def run_scouting() -> list[dict]:
     built_crew.kickoff()
     raw = resolution_task.output.raw
     try:
-        parsed = json.loads(raw)
-        contracts: list[dict] = [json.loads(item) if isinstance(item, str) else item for item in (parsed if isinstance(item, list) else [parsed])]
-    except (json.JSONDecodeError, AttributeError):
+        parsed = _extract_json_array(raw)
+        contracts: list[dict] = [json.loads(item) if isinstance(item, str) else item for item in parsed]
+    except (json.JSONDecodeError, AttributeError, ValueError) as e:
         log.error("Failed to parse Scout output as JSON. Raw output:\n%s", raw)
         contracts = []
+
+    # TODO: hard coded filename - consider dynamic naming with timestamp or user input
     _save_json({"contracts": contracts}, "01_scout_results.json")
     log.info("Scout found %d unique contracts.", len(contracts))
     return contracts
