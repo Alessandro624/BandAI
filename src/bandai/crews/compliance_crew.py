@@ -3,7 +3,6 @@ from __future__ import annotations
 import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task  # type: ignore
-from crewai.project import CrewBase  # type: ignore
 
 from bandai.config import COMPANY, get_llm, _MAX_REVIEW_ITERATIONS
 from bandai.models import AdvocateAnalysis, AuditorChallenge, ComplianceVerdict
@@ -16,7 +15,6 @@ def _load_yaml(filename: str) -> dict:
     return yaml.safe_load((_CFG / filename).read_text(encoding="utf-8"))
 
 
-@CrewBase
 class ComplianceCrew:
     """Compliance Crew - runs a structured debate to produce a bid verdict."""
 

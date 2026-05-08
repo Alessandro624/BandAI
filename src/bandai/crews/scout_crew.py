@@ -3,9 +3,8 @@ from __future__ import annotations
 import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task  # type: ignore
-from crewai.project import CrewBase, agent, crew, task  # type: ignore
 
-from bandai.config import BANDI_PORTALS, COMPANY, get_llm, portal_weight, PORTAL_WEIGHTS, _DEFAULT_PORTAL_WEIGHT
+from bandai.config import BANDI_PORTALS, COMPANY, get_llm, PORTAL_WEIGHTS, _DEFAULT_PORTAL_WEIGHT
 from bandai.models import ResolvedContract
 from bandai.tools.crawler_tools import ContractDetailTool, TenderCrawlerTool
 
@@ -22,7 +21,6 @@ def _build_weight_table() -> str:
     return "\n".join(rows)
 
 
-@CrewBase
 class ScoutCrew:
     """
     Scout Crew - discovers and deduplicates Italian public tenders.

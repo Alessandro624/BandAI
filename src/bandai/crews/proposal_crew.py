@@ -3,13 +3,17 @@ from __future__ import annotations
 import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task  # type: ignore[import]
-from crewai.project import CrewBase  # type: ignore[import]
 
 from bandai.config import COMPANY, get_llm
 from bandai.models import AuctionResult, DepartmentBid, FinalProposal
 from bandai.tools.crawler_tools import ProposalWriterTool
 
 _CFG = Path(__file__).parent.parent / "config"
+
+
+def _load_yaml(filename: str) -> dict:
+    return yaml.safe_load((_CFG / filename).read_text(encoding="utf-8"))
+
 
 # TODO: inject from company knowledge base instead of hardcoding here
 DEPARTMENT_PROFILES: dict[str, dict] = {
@@ -71,11 +75,6 @@ DEPARTMENT_PROFILES: dict[str, dict] = {
 }
 
 
-def _load_yaml(filename: str) -> dict:
-    return yaml.safe_load((_CFG / filename).read_text(encoding="utf-8"))
-
-
-@CrewBase
 class ProposalCrew:
     """Proposal Crew - runs an auction to build the optimal tender proposal."""
 
