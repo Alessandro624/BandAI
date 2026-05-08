@@ -89,10 +89,13 @@ def run_scouting() -> list[dict]:
         user_preferences = "No specific preferences - use standard CPV filters."
     built_crew, resolution_task = ScoutCrew().build(user_preferences=user_preferences)
     built_crew.kickoff()
+    raw = resolution_task.output.raw
     try:
-        contracts: list[dict] = json.loads(resolution_task.output.raw)
+        parsed = json.loads(raw)
+        contracts: list[dict] = [json.loads(item) if isinstance(item, str) else item for item in (parsed if isinstance(item, list) else [parsed])]
     except (json.JSONDecodeError, AttributeError):
-        contracts = [{"raw": str(resolution_task.output)}]
+        log.error("Failed to parse Scout output as JSON. Raw output:\n%s", raw)
+        contracts = []
     _save_json({"contracts": contracts}, "01_scout_results.json")
     log.info("Scout found %d unique contracts.", len(contracts))
     return contracts
