@@ -1,0 +1,79 @@
+advocate_task:
+  description: >
+    Analyse the following tender and produce an AdvocateAnalysis JSON object.
+
+    CONTRACT: {contract_summary}
+
+    COMPANY PROFILE:
+      Name            : {company_name}
+      Certifications  : {certifications}
+      Turnover (3y)   : {turnover}
+      Past contracts  : {past_contracts}
+
+    Instructions: 1. List every EXPLICIT requirement in the tender. 2. For each,
+    state: MEETS / POTENTIALLY MEETS (with caveats) / DOES NOT MEET. 3. For
+    "potentially" items, propose a concrete mitigation. 4. Assign
+    confidence_score (0-1) and overall_sentiment. 5. Return a JSON object
+    matching the AdvocateAnalysis schema.
+  expected_output: >
+    A valid JSON object: requirements_met, requirements_potentially_met,
+    risk_mitigations, overall_sentiment, confidence_score, summary.
+  agent: advocate
+
+auditor_task:
+  description: >
+    You have the Advocate's AdvocateAnalysis in context. Challenge it
+    point-by-point.
+
+    CONTRACT: {contract_summary}
+
+    Instructions: 1. Review each Advocate claim. 2. HARD BLOCKERS: requirements
+    the company cannot meet before the deadline. 3. SOFT RISKS: uncertain or
+    third-party-dependent requirements. 4. ADVOCATE_OVERESTIMATES: legally or
+    factually wrong Advocate claims. 5. Assign risk_score (0 = no risk, 1 =
+    certain failure). 6. Return a JSON object matching the AuditorChallenge
+    schema.
+  expected_output: >
+    A valid JSON object: hard_blockers, soft_risks, advocate_overestimates,
+    overall_sentiment, risk_score, summary.
+  agent: auditor
+
+verdict_task:
+  description: >
+    You have both the AdvocateAnalysis and AuditorChallenge in context.
+    Synthesise them into a binding ComplianceVerdict.
+
+    Instructions: 1. Weigh the evidence from both sides fairly. 2. Issue one of
+    three verdicts:
+       - GO           : bid confidently, risks are acceptable.
+       - NO-GO        : do not bid; risk of exclusion or loss is too high.
+       - CONDITIONAL-GO : bid IF listed conditions are met by deadline minus 3 days.
+    3. List key_risks and key_strengths (max 5 each). 4. List specific D.Lgs.
+    36/2023 articles to address in legal_flags. 5. Write verdict_rationale in
+    plain Italian (max 150 words) for the CEO. 6. Assign compliance_score (0-1).
+    7. Return a JSON object matching the ComplianceVerdict schema.
+  expected_output: >
+    A valid JSON object: bid_decision, conditions, key_risks, key_strengths,
+    compliance_score, legal_flags, verdict_rationale.
+  agent: compliance_officer
+
+human_review_task:
+  description: >
+    ORIGINAL VERDICT (CONDITIONAL-GO):
+    {original_verdict_json}
+
+    HUMAN NOTE (natural language):
+    {human_note}
+
+    Instructions:
+    1. Map each human claim to a specific condition or blocker in the verdict.
+    2. For each condition: determine if the human note resolves it (YES/PARTIAL/NO).
+    3. If ALL hard blockers are resolved → upgrade to GO.
+    4. If SOME are resolved → stay CONDITIONAL-GO, update conditions list.
+    5. If human note is vague or irrelevant → keep original verdict unchanged.
+    6. Return a ComplianceVerdict JSON matching the schema.
+    7. Set verdict_rationale to explain clearly what the human note changed.
+  expected_output: >
+    A valid ComplianceVerdict JSON: bid_decision, conditions, key_risks,
+    key_strengths, compliance_score, legal_flags, verdict_rationale.
+  agent: human_input_review_agent
