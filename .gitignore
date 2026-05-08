@@ -23,6 +23,7 @@ data/raw_tenders/*
 
 # Ignore locally generated proposals to prevent clutter
 outputs/
+output/
 generated_proposals/
 *.pdf
 *.docx
