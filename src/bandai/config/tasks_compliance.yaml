@@ -59,20 +59,37 @@ verdict_task:
 
 human_review_task:
   description: >
-    ORIGINAL VERDICT (CONDITIONAL-GO):
+    ORIGINAL VERDICT (CONDITIONAL-GO) - iteration {iteration}/{max_iterations}:
     {original_verdict_json}
 
     HUMAN NOTE (natural language):
     {human_note}
 
     Instructions:
-    1. Map each human claim to a specific condition or blocker in the verdict.
-    2. For each condition: determine if the human note resolves it (YES/PARTIAL/NO).
-    3. If ALL hard blockers are resolved → upgrade to GO.
-    4. If SOME are resolved → stay CONDITIONAL-GO, update conditions list.
-    5. If human note is vague or irrelevant → keep original verdict unchanged.
-    6. Return a ComplianceVerdict JSON matching the schema.
-    7. Set verdict_rationale to explain clearly what the human note changed.
+
+    STEP 0 - INTENT CHECK (do this first):
+    If the human note expresses any of the following, return NO-GO immediately
+    without further analysis:
+      - Inability to obtain required documents or certifications
+      - Absence of required resources, partners, or qualifications
+      - Explicit desire to stop, withdraw, or abandon the bid
+      - Any statement that a hard blocker cannot be resolved before the deadline
+    Set verdict_rationale to: "Rinuncia esplicita dell'utente: [quote the note]"
+
+    STEP 1 - MAP claims to conditions:
+    For each condition in the original verdict, determine whether the human
+    note provides a concrete, verifiable resolution (YES / PARTIAL / NO).
+
+    STEP 2 - DECIDE:
+      - ALL hard blockers resolved → GO
+      - SOME resolved → CONDITIONAL-GO, update conditions to only unresolved ones
+      - NONE resolved or note is vague → keep original verdict unchanged
+      - Abandonment language detected → NO-GO (see STEP 0)
+
+    STEP 3 - Set verdict_rationale explaining exactly what changed and why.
+    Iteration context: this is attempt {iteration} of {max_iterations}.
+
+    Return a ComplianceVerdict JSON.
   expected_output: >
     A valid ComplianceVerdict JSON: bid_decision, conditions, key_risks,
     key_strengths, compliance_score, legal_flags, verdict_rationale.
