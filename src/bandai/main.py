@@ -37,7 +37,7 @@ def _save_json(data: dict, filename: str) -> Path:
 def _contract_to_summary(c: dict) -> str:
     return (
         f"Titolo               : {c.get('title', 'N/A')}\n"
-        f"CIG                  : {c.get('canonical_contract_id', 'N/A')}\n"
+        f"Canonical Contract ID: {c.get('canonical_contract_id', 'N/A')}\n"
         f"Stazione appaltante  : {c.get('contracting_authority', 'N/A')}\n"
         f"Importo a base d'asta: EUR {c.get('value_eur', 0):,.0f}\n"
         f"Scadenza             : {c.get('deadline', 'N/A')}\n"
@@ -170,10 +170,10 @@ def run_compliance(contracts: list[dict]) -> list[tuple[dict, ComplianceVerdict]
                 )
         log.info("  -> %s  (score=%.2f)", verdict.bid_decision, verdict.compliance_score)
 
-        cig = contract.get("canonical_cig", f"unknown_{i}")
+        contract_id = contract.get("canonical_contract_id", f"unknown_{i}")
         _save_json(
             {"contract": contract, "verdict": verdict.model_dump()},
-            f"02_compliance_{i:02d}_{cig}.json",
+            f"02_compliance_{i:02d}_{contract_id}.json",
         )
 
         if verdict.bid_decision in ("GO", "CONDITIONAL-GO"):
@@ -183,7 +183,7 @@ def run_compliance(contracts: list[dict]) -> list[tuple[dict, ComplianceVerdict]
                 {
                     "requires_human_review": True,
                     "contract": {
-                        "cig": cig,
+                        "contract_id": contract_id,
                         "title": contract.get("title", "N/A"),
                         "value_eur": contract.get("value_eur"),
                         "deadline": contract.get("deadline"),
@@ -217,8 +217,8 @@ def run_proposals(approved: list[tuple[dict, ComplianceVerdict]]) -> list[FinalP
     proposals: list[FinalProposal] = []
 
     for i, (contract, verdict) in enumerate(approved, 1):
-        cig = contract.get("canonical_cig", f"unknown_{i}")
-        log.info("  [%d/%d] Writing proposal for CIG %s", i, len(approved), cig)
+        contract_id = contract.get("canonical_contract_id", f"unknown_{i}")
+        log.info("  [%d/%d] Writing proposal for Contract ID %s", i, len(approved), contract_id)
 
         summary = _contract_to_summary(contract)
         if verdict.bid_decision == "CONDITIONAL-GO" and verdict.conditions:
@@ -229,7 +229,7 @@ def run_proposals(approved: list[tuple[dict, ComplianceVerdict]]) -> list[FinalP
 
         proposal: FinalProposal = proposal_task.output.pydantic
         proposals.append(proposal)
-        _save_json(proposal.model_dump(), f"03_proposal_{i:02d}_{cig}.json")
+        _save_json(proposal.model_dump(), f"03_proposal_{i:02d}_{contract_id}.json")
         log.info("  OK %d words, quality=%.2f", proposal.word_count, proposal.quality_score)
 
     return proposals
@@ -269,17 +269,17 @@ def run() -> None:
         log.info("Scout-only complete. %d contracts.", len(contracts))
 
     elif args.mode == "propose":
-        if not args.cig:
-            log.error("--mode propose requires --cig <CIG>")
+        if not args.contract:
+            log.error("--mode propose requires --contract <CONTRACT_ID>")
             sys.exit(1)
         stub = {
-            "canonical_cig": args.cig,
-            "title": f"Contratto {args.cig} (manuale)",
+            "canonical_contract_id": args.contract,
+            "title": f"Contratto {args.contract} (manuale)",
             "contracting_authority": "Da capitolato",
             "deadline": "Da capitolato",
             "value_eur": 0,
             "cpv_codes": [],
-            "canonical_url": f"https://www.anticorruzione.it/cig/{args.cig}",
+            "canonical_url": f"https://www.anticorruzione.it/contract/{args.contract}",
         }
         approved = run_compliance([stub])
         proposals = run_proposals(approved)
@@ -289,7 +289,7 @@ def run() -> None:
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="BandAI - Italian SME Procurement Agent")
     p.add_argument("--mode", choices=["full", "scout", "propose"], default="full")
-    p.add_argument("--cig", type=str, default=None, help="Contract ID for --mode propose")
+    p.add_argument("--contract", type=str, default=None, help="Contract ID for --mode propose")
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args()
 

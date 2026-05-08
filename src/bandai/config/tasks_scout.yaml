@@ -7,7 +7,7 @@ crawl_task:
     codes: {ateco_codes}. Portal entry URL: {portal_url}
 
     Return a JSON array of RawContract objects with keys: portal, url, title,
-    cig, contracting_authority, deadline, value_eur, cpv_codes, raw_text.
+    contract_id, contracting_authority, deadline, value_eur, cpv_codes, raw_text.
   expected_output: >
     A JSON array of RawContract dicts. Every field that cannot be found must be
     set to null rather than omitted.
@@ -19,8 +19,8 @@ resolution_task:
     Perform the following steps:
 
     1. DEDUPLICATION
-       Group entries with the same CIG.
-       If CIG is absent, group by (contracting_authority + value_eur ± 5%).
+       Group entries with the same Contract ID.
+       If Contract ID is absent, group by (contracting_authority + value_eur ± 5%).
 
     2. CONSENSUS POLLING
        Apply the fixed portal reliability weights below - do NOT alter them:
@@ -35,7 +35,7 @@ resolution_task:
     3. OUTPUT
        Return a JSON array of ResolvedContract objects sorted by
        value_eur descending (biggest opportunity first).
-       Required fields: canonical_cig, title, contracting_authority,
+       Required fields: canonical_contract_id, title, contracting_authority,
        deadline, value_eur, cpv_codes, sources, consensus_score, canonical_url.
   expected_output: >
     A JSON array of ResolvedContract objects, deduplicated and ranked by
