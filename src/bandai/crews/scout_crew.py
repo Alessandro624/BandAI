@@ -116,6 +116,7 @@ class ScoutCrew:
             agent=preference_filter_agent,
             context=[resolution_task],
             human_input=True,  # pauses here, shows draft, waits for human
+            pydantic_output=list[ResolvedContract],
         )
 
         all_agents = crawler_agents + [resolution_agent, preference_filter_agent]
