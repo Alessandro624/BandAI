@@ -322,6 +322,13 @@ def replay() -> None:
 def test() -> None:
     log.info("Use 'crewai test' for crew testing.")
 
+def run_with_trigger() -> None:
+    """Run the BandAI pipeline from an external trigger.
+
+    This is currently a compatibility entrypoint for the pyproject script.
+    In the future, this can be extended to accept webhook/API payloads.
+    """
+    run()
 
 if __name__ == "__main__":
     run()
