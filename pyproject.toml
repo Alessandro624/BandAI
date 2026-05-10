@@ -5,7 +5,7 @@ description = "BandAI using crewAI"
 authors = [
     { name = "Alessandro Sidero", email = "sideroalessandro@gmail.com" },
     { name = "FirstName LastName", email = "example@example.com" },
-    { name = "FirstName LastName", email = "example@example.com" },
+    { name = "Nhat Quang Dang", email = "dangnhatquang199@gmail.com" },
 ]
 requires-python = ">=3.10,<3.14"
 dependencies = ["crewai[tools]==1.14.4"]
