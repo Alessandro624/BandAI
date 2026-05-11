@@ -59,6 +59,7 @@ Detailed architecture documentation is available under `docs/architecture/`:
 - [Crews](docs/architecture/crews.md): documents `ScoutCrew`, `ComplianceCrew`, and `ProposalCrew`, including their agents, tasks, inputs, outputs, and interaction flow.
 - [Data Models](docs/architecture/models.md): documents the Pydantic models used across scouting, compliance analysis, proposal auction, and final proposal generation.
 - [Tools](docs/architecture/tools.md): documents CrewAI tools, input schemas, current mock behavior, limitations, and planned improvements.
+- [Configuration](docs/architecture/configuration.md): documents environment variables, LLM provider setup, portal configuration, review limits, implicit NO-GO keywords, and company profile limitations.
 
 ---
 
