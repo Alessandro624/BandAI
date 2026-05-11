@@ -51,6 +51,17 @@ BandAI's intelligence relies on three distinct operational phases, each managed 
 
 ---
 
+## 📚 Architecture Documentation
+
+Detailed architecture documentation is available under `docs/architecture/`:
+
+- [Main Pipeline](docs/architecture/main_pipeline.md): explains the main orchestration flow, execution modes, entrypoints, human review loop, outputs, and logging.
+- [Crews](docs/architecture/crews.md): documents `ScoutCrew`, `ComplianceCrew`, and `ProposalCrew`, including their agents, tasks, inputs, outputs, and interaction flow.
+- [Data Models](docs/architecture/models.md): documents the Pydantic models used across scouting, compliance analysis, proposal auction, and final proposal generation.
+- [Tools](docs/architecture/tools.md): documents CrewAI tools, input schemas, current mock behavior, limitations, and planned improvements.
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
