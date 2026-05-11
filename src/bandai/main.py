@@ -5,6 +5,8 @@ import logging
 import sys
 import warnings
 import re
+import subprocess
+
 
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +35,26 @@ def _save_json(data: dict, filename: str) -> Path:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     log.info("Saved: %s", path)
     return path
+
+
+def _run_command(command: list[str]) -> None:
+    """Run a subprocess command and exit with the same return code.
+
+    This helper is used by CLI entrypoint wrappers such as train, replay,
+    and test. It keeps subprocess handling consistent and avoids duplicated
+    error handling logic.
+    """
+    log.info("Running command: %s", " ".join(command))
+
+    result = subprocess.run(command, check=False)
+
+    if result.returncode != 0:
+        log.error(
+            "Command failed with exit code %s: %s",
+            result.returncode,
+            " ".join(command),
+        )
+        sys.exit(result.returncode)
 
 
 def _contract_to_summary(c: dict) -> str:
@@ -269,38 +291,72 @@ def _print_summary(contracts, approved, proposals):
 
 
 def run() -> None:
+    """Run the BandAI procurement pipeline.
+
+    Supported modes:
+    - full: run scouting, compliance analysis, and proposal generation
+    - scout: run only the scouting phase
+    - propose: run compliance and proposal generation for a manual contract id
+    """
     args = _parse_args()
 
+    log.info(
+        "Starting BandAI pipeline | mode=%s | dry_run=%s",
+        args.mode,
+        args.dry_run,
+    )
+
     if args.dry_run:
-        log.info("DRY-RUN - no LLM calls. Config OK.")
+        log.info("DRY-RUN - no LLM calls. Configuration and entrypoint are valid.")
         sys.exit(0)
 
-    if args.mode == "full":
-        contracts = run_scouting()
-        approved = run_compliance(contracts)
-        proposals = run_proposals(approved)
-        _print_summary(contracts, approved, proposals)
+    try:
+        if args.mode == "full":
+            log.info("Starting scouting phase")
+            contracts = run_scouting()
+            log.info("Scouting phase completed | contracts_discovered=%d", len(contracts))
 
-    elif args.mode == "scout":
-        contracts = run_scouting()
-        log.info("Scout-only complete. %d contracts.", len(contracts))
+            log.info("Starting compliance phase")
+            approved = run_compliance(contracts)
+            log.info("Compliance phase completed | approved_contracts=%d", len(approved))
 
-    elif args.mode == "propose":
-        if not args.contract:
-            log.error("--mode propose requires --contract <CONTRACT_ID>")
-            sys.exit(1)
-        stub = {
-            "canonical_contract_id": args.contract,
-            "title": f"Contratto {args.contract} (manuale)",
-            "contracting_authority": "Da capitolato",
-            "deadline": "Da capitolato",
-            "value_eur": 0,
-            "cpv_codes": [],
-            "canonical_url": f"https://www.anticorruzione.it/contract/{args.contract}",
-        }
-        approved = run_compliance([stub])
-        proposals = run_proposals(approved)
-        _print_summary([stub], approved, proposals)
+            log.info("Starting proposal generation phase")
+            proposals = run_proposals(approved)
+            log.info("Proposal generation completed | proposals_generated=%d", len(proposals))
+
+            _print_summary(contracts, approved, proposals)
+
+        elif args.mode == "scout":
+            log.info("Starting scout-only mode")
+            contracts = run_scouting()
+            log.info("Scout-only mode completed | contracts_discovered=%d", len(contracts))
+
+        elif args.mode == "propose":
+            if not args.contract:
+                log.error("--mode propose requires --contract <CONTRACT_ID>")
+                sys.exit(1)
+
+            log.info("Starting proposal mode | contract_id=%s", args.contract)
+
+            stub = {
+                "canonical_contract_id": args.contract,
+                "title": f"Contratto {args.contract} (manuale)",
+                "contracting_authority": "Da capitolato",
+                "deadline": "Da capitolato",
+                "value_eur": 0,
+                "cpv_codes": [],
+                "canonical_url": f"https://www.anticorruzione.it/contract/{args.contract}",
+            }
+
+            approved = run_compliance([stub])
+            proposals = run_proposals(approved)
+            _print_summary([stub], approved, proposals)
+
+        log.info("BandAI pipeline completed successfully")
+
+    except Exception:
+        log.exception("BandAI pipeline failed")
+        raise
 
 
 def _parse_args() -> argparse.Namespace:
@@ -312,15 +368,37 @@ def _parse_args() -> argparse.Namespace:
 
 
 def train() -> None:
-    log.info("Training not applicable. Use 'bandai' to run.")
+    """Run CrewAI training through the CLI.
+
+    Extra arguments are forwarded to `crewai train`.
+
+    Example:
+        uv run train -n 5 -f training.json
+    """
+    _run_command(["crewai", "train", *sys.argv[1:]])
 
 
 def replay() -> None:
-    log.info("Use 'crewai replay -t <task_id>' for task replay.")
+    """Replay a previous CrewAI task execution through the CLI.
+
+    Extra arguments are forwarded to `crewai replay`.
+
+    Example:
+        uv run replay -t <task_id>
+    """
+    _run_command(["crewai", "replay", *sys.argv[1:]])
 
 
 def test() -> None:
-    log.info("Use 'crewai test' for crew testing.")
+    """Run CrewAI test evaluations through the CLI.
+
+    Extra arguments are forwarded to `crewai test`.
+
+    Example:
+        uv run test -n 5 -m gpt-4o-mini
+    """
+    _run_command(["crewai", "test", *sys.argv[1:]])
+
 
 def run_with_trigger() -> None:
     """Run the BandAI pipeline from an external trigger.
