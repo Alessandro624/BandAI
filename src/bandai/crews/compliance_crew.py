@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import Tuple
 
-import yaml
 from crewai import Agent, Crew, Process, Task  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
 from crewai import TaskOutput  # type: ignore
@@ -12,16 +11,9 @@ from bandai.config import get_llm, get_embedder, get_memory, _MAX_REVIEW_ITERATI
 from bandai.knowledge_sources import get_all_knowledge_sources
 from bandai.models import AdvocateAnalysis, AuditorChallenge, ComplianceVerdict, load_company_profile
 from bandai.tools.crawler_tools import ComplianceCheckerTool
-
-from typing import Tuple
+from bandai.crews.utils import load_yaml_config
 
 log = logging.getLogger(__name__)
-
-_CFG = Path(__file__).resolve().parents[1] / "config"
-
-
-def _load_yaml(filename: str) -> dict:
-    return yaml.safe_load((_CFG / filename).read_text(encoding="utf-8"))
 
 
 # Guardrails
@@ -31,18 +23,31 @@ def _validate_verdict(result: TaskOutput):
     """Ensure the compliance verdict has a valid bid_decision."""
     try:
         verdict = result.pydantic
-    except Exception:
-        return (False, "Could not parse output as ComplianceVerdict JSON.")
-    if verdict.bid_decision not in ("GO", "NO-GO", "CONDITIONAL-GO"):
-        return (
-            False,
-            f"bid_decision must be GO, NO-GO, or CONDITIONAL-GO; got '{verdict.bid_decision}'.",
-        )
-    if verdict.compliance_score < 0.0 or verdict.compliance_score > 1.0:
-        return (
-            False,
-            f"compliance_score must be between 0.0 and 1.0; got {verdict.compliance_score}.",
-        )
+    except Exception as e:
+        return (False, f"Could not parse output as ComplianceVerdict JSON: {str(e)}")
+
+    # Auto-correct bid_decision to uppercase
+    if isinstance(verdict.bid_decision, str):
+        normalized_decision = verdict.bid_decision.strip().upper()
+        if normalized_decision not in ("GO", "NO-GO", "CONDITIONAL-GO"):
+            return (
+                False,
+                f"bid_decision must be GO, NO-GO, or CONDITIONAL-GO; got '{verdict.bid_decision}'.",
+            )
+        verdict.bid_decision = normalized_decision
+
+    # Auto-clamp compliance_score to [0.0, 1.0]
+    try:
+        score = float(verdict.compliance_score)
+        if score < 0.0:
+            verdict.compliance_score = 0.0
+        elif score > 1.0:
+            verdict.compliance_score = 1.0
+        else:
+            verdict.compliance_score = score
+    except (ValueError, TypeError):
+        return (False, f"compliance_score must be a number, got {verdict.compliance_score}.")
+
     return (True, result)
 
 
@@ -65,8 +70,8 @@ class ComplianceCrew:
 
     def build(self, contract_summary: str) -> Tuple[Crew, Task]:
         """Build and return (crew, verdict_task) for a specific contract."""
-        ac = _load_yaml("agents_compliance.yaml")
-        tc = _load_yaml("tasks_compliance.yaml")
+        ac = load_yaml_config("agents_compliance.yaml")
+        tc = load_yaml_config("tasks_compliance.yaml")
 
         company = load_company_profile()
 
@@ -155,8 +160,8 @@ class ComplianceCrew:
         iteration: int = 1,
     ) -> Tuple[Crew, Task]:
         """Build a review crew for CONDITIONAL-GO re-evaluation."""
-        ac = _load_yaml("agents_compliance.yaml")
-        tc = _load_yaml("tasks_compliance.yaml")
+        ac = load_yaml_config("agents_compliance.yaml")
+        tc = load_yaml_config("tasks_compliance.yaml")
 
         reviewer = Agent(
             role=ac["human_input_review_agent"]["role"],

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import Tuple
 
-import yaml
 from crewai import Agent, Crew, Process, Task  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
 
@@ -17,16 +16,9 @@ from bandai.models import (
     load_company_profile,
 )
 from bandai.tools.crawler_tools import ProposalWriterTool
-
-from typing import Tuple
+from bandai.crews.utils import load_yaml_config
 
 log = logging.getLogger(__name__)
-
-_CFG = Path(__file__).resolve().parents[1] / "config"
-
-
-def _load_yaml(filename: str) -> dict:
-    return yaml.safe_load((_CFG / filename).read_text(encoding="utf-8"))
 
 
 def _load_company() -> CompanyProfile:
@@ -51,8 +43,8 @@ class ProposalCrew:
         total_word_limit: int = 3000,
     ) -> Tuple[Crew, Task]:
         """Build and return (crew, proposal_task) for a specific contract."""
-        ac = _load_yaml("agents_proposal.yaml")
-        tc = _load_yaml("tasks_proposal.yaml")
+        ac = load_yaml_config("agents_proposal.yaml")
+        tc = load_yaml_config("tasks_proposal.yaml")
 
         dept_agents: list[Agent] = []
         dept_bid_tasks: list[Task] = []

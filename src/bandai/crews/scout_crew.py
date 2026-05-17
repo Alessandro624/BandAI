@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import logging
 import json
-import re
-from pathlib import Path
-from typing import Any, Tuple
+from typing import Tuple
 
-import yaml
 from crewai import Agent, Crew, Process, Task  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
 from crewai import TaskOutput  # type: ignore
@@ -15,14 +12,9 @@ from bandai.config import BANDI_PORTALS, get_llm, get_embedder, get_memory, PORT
 from bandai.knowledge_sources import get_all_knowledge_sources
 from bandai.models import ResolvedContract, load_company_profile
 from bandai.tools.crawler_tools import ContractDetailTool, TenderCrawlerTool
+from bandai.crews.utils import load_yaml_config
 
 log = logging.getLogger(__name__)
-
-_CFG = Path(__file__).resolve().parents[1] / "config"
-
-
-def _load_yaml(filename: str) -> dict:
-    return yaml.safe_load((_CFG / filename).read_text(encoding="utf-8"))
 
 
 def _build_weight_table() -> str:
@@ -37,32 +29,45 @@ def _build_weight_table() -> str:
 def _validate_resolution_output(result: TaskOutput):
     """Ensure the resolution agent returns a parseable JSON array."""
     raw = result.raw.strip()
-    if not raw.startswith("[") or not raw.endswith("]"):
-        return (False, "Output must be a raw JSON array starting with '[' and ending with ']'. No markdown fences or text.")
+
+    # Try to find JSON array bounds in the text (handles markdown and explanations)
+    start_idx = raw.find("[")
+    end_idx = raw.rfind("]")
+
+    if start_idx == -1 or end_idx == -1 or start_idx >= end_idx:
+        return (False, "No JSON array found in response. Ensure output contains '[...]'.")
+
+    json_str = raw[start_idx : end_idx + 1]
+
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(json_str)
         if not isinstance(parsed, list):
             return (False, "Output must be a JSON array (list), not a single object.")
-        return (True, result.raw)
-    except json.JSONDecodeError:
-        return (False, "Output is not valid JSON. Ensure the response is a properly formatted JSON array.")
+        return (True, json_str)
+    except json.JSONDecodeError as e:
+        return (False, f"Extracted text is not valid JSON: {str(e)}. Ensure the array is properly formatted.")
 
 
 def _validate_preference_output(result: TaskOutput):
     """Ensure the preference filter returns a valid JSON array."""
     raw = result.raw.strip()
-    # Strip markdown code fences if present
-    raw_clean = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw_clean = re.sub(r"\s*```$", "", raw_clean)
-    if not raw_clean.startswith("[") or not raw_clean.endswith("]"):
-        return (False, "Output must be a raw JSON array. No markdown fences or explanatory text allowed.")
+
+    # Try to find JSON array bounds in the text (handles markdown and explanations)
+    start_idx = raw.find("[")
+    end_idx = raw.rfind("]")
+
+    if start_idx == -1 or end_idx == -1 or start_idx >= end_idx:
+        return (False, "No JSON array found in response. Ensure output contains '[...]'.")
+
+    json_str = raw[start_idx : end_idx + 1]
+
     try:
-        parsed = json.loads(raw_clean)
+        parsed = json.loads(json_str)
         if not isinstance(parsed, list):
             return (False, "Output must be a JSON array (list).")
-        return (True, raw_clean)
-    except json.JSONDecodeError:
-        return (False, "Output is not valid JSON. Return a properly formatted JSON array only.")
+        return (True, json_str)
+    except json.JSONDecodeError as e:
+        return (False, f"Extracted text is not valid JSON: {str(e)}. Return a properly formatted JSON array only.")
 
 
 # Crew Class
@@ -87,8 +92,8 @@ class ScoutCrew:
         crawler_agents: list[Agent] = []
         crawl_tasks: list[Task] = []
 
-        ac = _load_yaml("agents_scout.yaml")
-        tc = _load_yaml("tasks_scout.yaml")
+        ac = load_yaml_config("agents_scout.yaml")
+        tc = load_yaml_config("tasks_scout.yaml")
 
         for portal in BANDI_PORTALS:
             agent_cfg = ac["crawler_agent"]
