@@ -3,10 +3,15 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+if TYPE_CHECKING:
+    from crewai.llms.base_llm import BaseLLM  # type: ignore
+
 log = logging.getLogger(__name__)
+logging.getLogger("opentelemetry.attributes").setLevel(logging.ERROR)
 
 _CFG = Path(__file__).parent
 
@@ -35,11 +40,15 @@ class ProviderProfile(BaseModel):
     @property
     def main_model(self) -> str:
         """Full model identifier in provider/model format."""
+        if "/" in self.main.model:
+            return self.main.model
         return f"{self.name}/{self.main.model}"
 
     @property
     def fast_model(self) -> str:
         """Full model identifier in provider/model format."""
+        if "/" in self.fast.model:
+            return self.fast.model
         return f"{self.name}/{self.fast.model}"
 
 
@@ -117,20 +126,99 @@ def get_api_key() -> str:
     raise ValueError(f"No API key configured for provider '{provider.name}'.{available_msg}")
 
 
-def get_llm(fast: bool = False) -> "LLM":  # type: ignore[valid-type]
+def get_llm(fast: bool = False) -> BaseLLM:  # type: ignore[valid-type]
     """Return a CrewAI LLM object for the active provider."""
-    from crewai import LLM  # type: ignore[import]
+    from crewai import LLM  # type: ignore
 
     provider = get_active_provider()
+
+    # Allow overriding base URL via env var (useful for local servers)
+    base_url = os.getenv("PROVIDER_BASE_URL", provider.base_url)
+
+    # Start from provider profile, then apply optional env overrides
     profile = provider.fast if fast else provider.main
+
+    # ENV overrides for model specs
+    env_model = os.getenv("FAST_MODEL" if fast else "MAIN_MODEL")
+    if env_model:
+        # If env contains provider prefix (provider/model), use as-is; else use model name
+        profile_model = env_model
+    else:
+        profile_model = profile.model
+
+    # Numeric overrides
+    env_temp = os.getenv("FAST_TEMPERATURE" if fast else "MAIN_TEMPERATURE")
+    if env_temp is not None:
+        try:
+            profile_temperature = float(env_temp)
+        except ValueError:
+            profile_temperature = profile.temperature
+    else:
+        profile_temperature = profile.temperature
+
+    env_max = os.getenv("FAST_MAX_TOKENS" if fast else "MAIN_MAX_TOKENS")
+    if env_max is not None:
+        try:
+            profile_max = int(env_max)
+        except ValueError:
+            profile_max = profile.max_tokens
+    else:
+        profile_max = profile.max_tokens
+
     api_key = get_api_key() if provider.env_key else None
 
+    # If profile_model already contains provider prefix, use it; otherwise combine with provider.name
+    model_id = profile_model if "/" in profile_model else f"{provider.name}/{profile_model}"
+
     return LLM(
-        model=f"{provider.name}/{profile.model}",
+        model=model_id,
         api_key=api_key,
-        base_url=provider.base_url,
-        temperature=profile.temperature,
-        max_tokens=profile.max_tokens,
+        base_url=base_url,
+        temperature=profile_temperature,
+        max_tokens=profile_max,
+    )
+
+
+def get_embedder() -> dict | None:
+    """Return an embedder configuration dict for Crew(embedder=...)."""
+    provider = os.getenv("EMBEDDER_PROVIDER")
+    if not provider:
+        return None
+
+    model = os.getenv("EMBEDDER_MODEL", "")
+    base_url = os.getenv("EMBEDDER_BASE_URL", "")
+    api_key = os.getenv("EMBEDDER_API_KEY", "")
+
+    # If model is empty, fall back to sensible defaults per provider
+    if not model:
+        if provider == "ollama":
+            model = "nomic-embed-text:latest"
+        elif provider == "openai":
+            model = "text-embedding-3-large"
+        else:
+            model = "default-embed-model"
+
+    embedder: dict = {"provider": provider, "config": {"model_name": model}}
+    if base_url:
+        embedder["config"]["base_url"] = base_url
+    if api_key:
+        embedder["config"]["api_key"] = api_key
+
+    return embedder
+
+
+def get_memory() -> "Memory | bool":  # type: ignore[valid-type]
+    """Return a CrewAI Memory object wired to the active provider."""
+    from crewai.memory.unified_memory import Memory  # type: ignore
+
+    # Memory uses the fast model for its analysis LLM (scope inference,
+    # importance scoring, consolidation).  The model ID must match
+    # whatever the active provider expects.
+    memory_llm = get_llm(fast=True)
+
+    return Memory(
+        llm=memory_llm,
+        embedder=get_embedder(),
     )
 
 
