@@ -200,7 +200,7 @@ def get_embedder() -> dict | None:
 
     embedder: dict = {"provider": provider, "config": {"model_name": model}}
     if base_url:
-        embedder["config"]["base_url"] = base_url
+        embedder["config"]["url"] = base_url
     if api_key:
         embedder["config"]["api_key"] = api_key
 
