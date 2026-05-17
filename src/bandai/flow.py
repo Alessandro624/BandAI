@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 from crewai.flow.flow import Flow, listen, router, start  # type: ignore
+from crewai.flow.persistence import persist  # type: ignore
 
 from bandai.crews.compliance_crew import ComplianceCrew
 from bandai.crews.proposal_crew import ProposalCrew
@@ -115,29 +116,35 @@ def _ask_human_on_conditional_go(
 # BandAI Flow
 
 
+@persist()
 class BandAIFlow(Flow[BandAIState]):
     """
     CrewAI Flow that orchestrates the full BandAI procurement pipeline.
     """
 
     @start()
-    def begin(self) -> str:
-        """Entry point: gather user preferences and start scouting."""
+    def begin(self) -> None:
+        """Entry point: gather user preferences."""
         if self.state.mode == "full":
             log.info("=== PHASE 1: SCOUTING ===")
             print("\nDescribe your preferences for this scouting session.")
             print("Examples: sector, region, minimum/maximum amount, keywords...")
             prefs = input("Preferences (press Enter to skip): ").strip()
             self.state.user_preferences = prefs or "No specific preferences - use standard CPV filters."
-            return "scout"
         elif self.state.mode == "scout":
             self.state.user_preferences = "No specific preferences - use standard CPV filters."
+
+    @router(begin)
+    def route_from_begin(self) -> str:
+        """Decide: scout, or skip straight to compliance?"""
+        if self.state.mode in ("full", "scout"):
             return "scout"
-        else:
-            return "skip_scout"
+        return "skip_scout"
+
+    # Phase 1: Scouting
 
     @listen("scout")
-    def run_scouting(self) -> str:
+    def run_scouting(self) -> None:
         """Run the Scout crew to discover tenders."""
         try:
             built_crew, final_task = ScoutCrew().build(user_preferences=self.state.user_preferences)
@@ -147,7 +154,7 @@ class BandAIFlow(Flow[BandAIState]):
             try:
                 parsed = _extract_json_array(raw)
                 contracts = [json.loads(item) if isinstance(item, str) else item for item in parsed]
-            except (json.JSONDecodeError, AttributeError, ValueError) as e:
+            except (json.JSONDecodeError, AttributeError, ValueError):
                 log.error("Failed to parse Scout output as JSON. Raw output:\n%s", raw)
                 contracts = []
 
@@ -159,9 +166,7 @@ class BandAIFlow(Flow[BandAIState]):
             log.exception("Scouting failed")
             self.state.contracts = []
 
-        return "after_scout"
-
-    @router("after_scout")
+    @router(run_scouting)
     def route_after_scout(self) -> str:
         """Decide next step after scouting."""
         if self.state.mode == "scout":
@@ -171,28 +176,42 @@ class BandAIFlow(Flow[BandAIState]):
     @listen("end_scout")
     def end_scout_only(self) -> None:
         """Scout-only mode: print summary and stop."""
-        log.info("Scout-only mode completed | contracts_discovered=%d", len(self.state.contracts))
+        log.info(
+            "Scout-only mode completed | contracts_discovered=%d",
+            len(self.state.contracts),
+        )
 
     @listen("skip_scout")
-    def skip_to_compliance(self) -> str:
+    def skip_to_compliance(self) -> None:
         """Skip scouting when mode != full/scout."""
+
+    @router(skip_to_compliance)
+    def route_skip(self) -> str:
         return "start_compliance"
 
+    # Phase 2: Compliance
+
     @listen("start_compliance")
-    def init_compliance(self) -> str:
+    def init_compliance(self) -> None:
         """Initialize compliance analysis for all discovered contracts."""
-        log.info("=== PHASE 2: COMPLIANCE ANALYSIS (%d contracts) ===", len(self.state.contracts))
+        log.info(
+            "=== PHASE 2: COMPLIANCE ANALYSIS (%d contracts) ===",
+            len(self.state.contracts),
+        )
         self.state.current_contract_index = 0
+
+    @router(init_compliance)
+    def route_after_init(self) -> str:
         return "process_next_contract"
 
     @listen("process_next_contract")
-    def process_next_contract(self) -> str:
+    def process_next_contract(self) -> None:
         """Process the next contract in the compliance queue."""
         contracts = self.state.contracts
         idx = self.state.current_contract_index
 
         if idx >= len(contracts):
-            # All contracts processed
+            # All contracts processed - save NO-GO log
             if self.state.no_go_log:
                 _save_json(
                     {"no_go_contracts": self.state.no_go_log, "total": len(self.state.no_go_log)},
@@ -207,7 +226,7 @@ class BandAIFlow(Flow[BandAIState]):
                 len(self.state.approved_contracts),
                 len(contracts),
             )
-            return "compliance_done"
+            return
 
         contract = contracts[idx]
         self.state.current_contract = contract
@@ -220,10 +239,15 @@ class BandAIFlow(Flow[BandAIState]):
             contract.get("title", "?"),
         )
 
+    @router(process_next_contract)
+    def route_process_contract(self) -> str:
+        """All done, or run compliance on the next contract?"""
+        if self.state.current_contract_index >= len(self.state.contracts):
+            return "compliance_done"
         return "run_compliance_crew"
 
     @listen("run_compliance_crew")
-    def run_compliance_crew(self) -> str:
+    def run_compliance_crew(self) -> None:
         """Run the Compliance crew for the current contract."""
         try:
             built_crew, verdict_task = ComplianceCrew().build(self.state.current_summary)
@@ -237,16 +261,16 @@ class BandAIFlow(Flow[BandAIState]):
                 verdict.compliance_score,
             )
         except Exception:
-            log.exception("Compliance crew failed for contract %s", self.state.current_contract_index)
+            log.exception(
+                "Compliance crew failed for contract %s",
+                self.state.current_contract_index,
+            )
             self.state.current_verdict = None
 
-        return "route_verdict"
-
-    @router("route_verdict")
+    @router(run_compliance_crew)
     def route_verdict(self) -> str:
         """Route based on the compliance verdict."""
         if self.state.current_verdict is None:
-            # Error case: move to next contract
             self.state.current_contract_index += 1
             return "process_next_contract"
 
@@ -265,9 +289,15 @@ class BandAIFlow(Flow[BandAIState]):
             self.state.current_contract_index += 1
             return "process_next_contract"
 
+    # Conditional-GO human review loop
+
     @listen("handle_conditional_go")
-    def handle_conditional_go(self) -> str:
-        """Handle CONDITIONAL-GO with human review loop."""
+    def handle_conditional_go(self) -> None:
+        """Handle CONDITIONAL-GO with human review loop.
+
+        All logic lives here - the router just checks the verdict state
+        to decide whether to loop or continue.
+        """
         verdict = ComplianceVerdict(**self.state.current_verdict)
         contract = self.state.current_contract
         iteration = self.state.review_iteration
@@ -279,7 +309,7 @@ class BandAIFlow(Flow[BandAIState]):
             log.info("  Human skipped - keeping CONDITIONAL-GO as-is.")
             self._save_compliance_result()
             self.state.current_contract_index += 1
-            return "process_next_contract"
+            return
 
         # Exit 2: fast implicit NO-GO detection (pre-LLM)
         if _is_implicit_no_go(human_note):
@@ -295,7 +325,7 @@ class BandAIFlow(Flow[BandAIState]):
             ).model_dump()
             self._save_no_go(ComplianceVerdict(**self.state.current_verdict))
             self.state.current_contract_index += 1
-            return "process_next_contract"
+            return
 
         # Substantive input: run review crew
         try:
@@ -316,7 +346,6 @@ class BandAIFlow(Flow[BandAIState]):
         except Exception:
             log.exception("Review crew failed")
             # Keep original verdict on error
-            pass
 
         updated_verdict = ComplianceVerdict(**self.state.current_verdict)
 
@@ -334,12 +363,13 @@ class BandAIFlow(Flow[BandAIState]):
                     key_strengths=updated_verdict.key_strengths,
                     compliance_score=updated_verdict.compliance_score,
                     legal_flags=updated_verdict.legal_flags,
-                    verdict_rationale=(f"No resolution reached after {_MAX_REVIEW_ITERATIONS} human review iterations. " f"Bid classified as NO-GO for security reasons."),
+                    verdict_rationale=(f"No resolution reached after {_MAX_REVIEW_ITERATIONS} " f"human review iterations. " f"Bid classified as NO-GO for security reasons."),
                 ).model_dump()
                 self._save_no_go(ComplianceVerdict(**self.state.current_verdict))
                 self.state.current_contract_index += 1
-                return "process_next_contract"
-            return "handle_conditional_go"  # loop back for another iteration
+                return
+            # Still CONDITIONAL-GO under the limit - router will loop back
+            return
 
         # GO or NO-GO from review
         if updated_verdict.bid_decision == "GO":
@@ -349,17 +379,32 @@ class BandAIFlow(Flow[BandAIState]):
             self._save_no_go(updated_verdict)
 
         self.state.current_contract_index += 1
+
+    @router(handle_conditional_go)
+    def route_after_conditional(self) -> str:
+        """Loop back for another review iteration, or move on."""
+        if self.state.current_verdict is not None:
+            verdict = ComplianceVerdict(**self.state.current_verdict)
+            if verdict.bid_decision == "CONDITIONAL-GO":
+                return "handle_conditional_go"
         return "process_next_contract"
 
+    # Phase 2 done -> Phase 3
+
     @listen("compliance_done")
-    def after_compliance(self) -> str:
-        """Compliance phase complete - move to proposals or end."""
+    def after_compliance(self) -> None:
+        """Compliance phase complete - move to proposals."""
         self.state.total_approved = len(self.state.approved_contracts)
         log.info(
             "Compliance phase completed | approved_contracts=%d",
             self.state.total_approved,
         )
+
+    @router(after_compliance)
+    def route_after_compliance(self) -> str:
         return "start_proposals"
+
+    # Phase 3: Proposals
 
     @listen("start_proposals")
     def run_proposals(self) -> None:
@@ -403,7 +448,7 @@ class BandAIFlow(Flow[BandAIState]):
         self.state.total_proposals = len(self.state.proposals)
         self._print_summary()
 
-    # Helpers
+    # Internal helpers
 
     def _save_compliance_result(self) -> None:
         idx = self.state.current_contract_index + 1
