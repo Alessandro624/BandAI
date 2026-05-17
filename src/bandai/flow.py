@@ -8,7 +8,6 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 from crewai.flow.flow import Flow, listen, router, start  # type: ignore
-from crewai.flow.persistence import persist  # type: ignore
 
 from bandai.crews.compliance_crew import ComplianceCrew
 from bandai.crews.proposal_crew import ProposalCrew
@@ -116,15 +115,9 @@ def _ask_human_on_conditional_go(
 # BandAI Flow
 
 
-@persist()
 class BandAIFlow(Flow[BandAIState]):
     """
     CrewAI Flow that orchestrates the full BandAI procurement pipeline.
-    The @persist decorator serialises BandAIState to disk after each
-    step completes.  If the process crashes or is interrupted, the flow can
-    be resumed from the last completed step by re-running bandai without
-    changing any arguments. The persisted state lives in CrewAI's default
-    storage directory (.crewai/flow_state/).
     """
 
     @start()
@@ -249,7 +242,7 @@ class BandAIFlow(Flow[BandAIState]):
 
         return "route_verdict"
 
-    @router("run_compliance_crew")
+    @router("route_verdict")
     def route_verdict(self) -> str:
         """Route based on the compliance verdict."""
         if self.state.current_verdict is None:

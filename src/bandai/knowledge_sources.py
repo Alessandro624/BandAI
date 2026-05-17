@@ -33,4 +33,6 @@ def get_all_knowledge_sources() -> list:
         sources.append(get_company_knowledge_source())
     except FileNotFoundError:
         log.warning("Company profile knowledge source not found - " "agents will rely on prompt-injected data only.")
+    except Exception:
+        log.warning("Failed to create knowledge source ...")
     return sources
