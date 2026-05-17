@@ -1,25 +1,36 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
+from typing import Any
 
-from crewai.knowledge.source.json_knowledge_source import JSONKnowledgeSource  # type: ignore
+from crewai.knowledge.source.string_knowledge_source import StringKnowledgeSource  # type: ignore
 
 log = logging.getLogger(__name__)
 
-_KNOWLEDGE_DIR = Path(__file__).parent.parent.parent / "knowledge"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_COMPANY_PROFILE_PATH = _PROJECT_ROOT / "knowledge" / "company_profile.json"
 
 
 # Public helpers
 
 
-def get_company_knowledge_source() -> JSONKnowledgeSource:
-    """Build a CrewAI KnowledgeSource from the company profile JSON."""
-    path = _KNOWLEDGE_DIR / "company_profile.json"
-    if not path.exists():
-        raise FileNotFoundError(f"Knowledge source not found: {path}. " "Create knowledge/company_profile.json based on the template.")
-    log.info("Registering knowledge source: %s", path)
-    return JSONKnowledgeSource(file_path=str(path))
+def get_company_knowledge_data() -> dict[str, Any]:
+    """Return the company knowledge as validated JSON-compatible data."""
+    if not _COMPANY_PROFILE_PATH.exists():
+        raise FileNotFoundError(f"Knowledge source not found: {_COMPANY_PROFILE_PATH}. " "Create knowledge/company_profile.json based on the template.")
+
+    return json.loads(_COMPANY_PROFILE_PATH.read_text(encoding="utf-8"))
+
+
+def get_company_knowledge_source() -> StringKnowledgeSource:
+    """Build a CrewAI knowledge source from the company profile data."""
+    data = get_company_knowledge_data()
+    log.info("Registering company knowledge source from validated data")
+    return StringKnowledgeSource(
+        content=json.dumps(data, ensure_ascii=False, indent=2),
+    )
 
 
 def get_all_knowledge_sources() -> list:

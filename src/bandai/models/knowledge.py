@@ -9,8 +9,6 @@ from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
-_KNOWLEDGE_DIR = Path(__file__).parent.parent.parent / "knowledge"
-
 
 # Knowledge Models
 
@@ -57,16 +55,14 @@ class CompanyProfile(BaseModel):
         return list(self.departments.keys())
 
 
-def load_company_profile(path: Path | None = None) -> CompanyProfile:
-    """Load the company profile from the knowledge directory."""
-    if path is None:
-        path = _KNOWLEDGE_DIR / "company_profile.json"
+def load_company_profile(data: dict[str, Any] | None = None) -> CompanyProfile:
+    """Load and validate the company profile data."""
+    if data is None:
+        from bandai.knowledge_sources import get_company_knowledge_data
 
-    if not path.exists():
-        raise FileNotFoundError(f"Company profile not found at {path}. " "Create knowledge/company_profile.json based on the provided template.")
+        data = get_company_knowledge_data()
 
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
         profile = CompanyProfile.model_validate(data)
         log.info(
             "Loaded company profile: %s (%d departments, %d past contracts)",
@@ -76,4 +72,4 @@ def load_company_profile(path: Path | None = None) -> CompanyProfile:
         )
         return profile
     except Exception as e:
-        raise ValueError(f"Invalid company profile in {path}: {e}") from e
+        raise ValueError(f"Invalid company profile data: {e}") from e
