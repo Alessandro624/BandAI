@@ -209,6 +209,10 @@ def get_embedder() -> dict | None:
 
 def get_memory() -> "Memory | bool":  # type: ignore[valid-type]
     """Return a CrewAI Memory object wired to the active provider."""
+
+    if os.getenv("DISABLE_MEMORY", "false").lower() in ("1", "true", "yes"):
+        return False  # type: ignore[return-value]
+
     from crewai.memory.unified_memory import Memory  # type: ignore
 
     # Memory uses the fast model for its analysis LLM (scope inference,
