@@ -16,6 +16,8 @@ from bandai.crews.scout_crew import ScoutCrew
 from bandai.models import ComplianceVerdict, FinalProposal
 from bandai.config import IMPLICIT_NO_GO_KEYWORDS, _MAX_REVIEW_ITERATIONS
 
+from typing import Tuple
+
 log = logging.getLogger("bandai.flow")
 
 OUTPUT_DIR = Path("output")
@@ -37,7 +39,7 @@ class BandAIState(BaseModel):
 
     # Phase 2: Compliance
     current_contract_index: int = 0
-    approved_contracts: list[tuple[dict, dict]] = Field(default_factory=list)
+    approved_contracts: list[Tuple[dict, dict]] = Field(default_factory=list)
     no_go_log: list[dict] = Field(default_factory=list)
     current_verdict: dict | None = None
     current_contract: dict | None = None
@@ -205,7 +207,7 @@ class BandAIFlow(Flow[BandAIState]):
         return "process_next_contract"
 
     @listen("process_next_contract")
-    def process_next_contract(self) -> None:
+    def process_next_contract_func(self) -> None:
         """Process the next contract in the compliance queue."""
         contracts = self.state.contracts
         idx = self.state.current_contract_index
@@ -239,7 +241,7 @@ class BandAIFlow(Flow[BandAIState]):
             contract.get("title", "?"),
         )
 
-    @router(process_next_contract)
+    @router(process_next_contract_func)
     def route_process_contract(self) -> str:
         """All done, or run compliance on the next contract?"""
         if self.state.current_contract_index >= len(self.state.contracts):
@@ -247,7 +249,7 @@ class BandAIFlow(Flow[BandAIState]):
         return "run_compliance_crew"
 
     @listen("run_compliance_crew")
-    def run_compliance_crew(self) -> None:
+    def run_compliance_crew_func(self) -> None:
         """Run the Compliance crew for the current contract."""
         try:
             built_crew, verdict_task = ComplianceCrew().build(self.state.current_summary)
@@ -267,7 +269,7 @@ class BandAIFlow(Flow[BandAIState]):
             )
             self.state.current_verdict = None
 
-    @router(run_compliance_crew)
+    @router(run_compliance_crew_func)
     def route_verdict(self) -> str:
         """Route based on the compliance verdict."""
         if self.state.current_verdict is None:
@@ -292,7 +294,7 @@ class BandAIFlow(Flow[BandAIState]):
     # Conditional-GO human review loop
 
     @listen("handle_conditional_go")
-    def handle_conditional_go(self) -> None:
+    def handle_conditional_go_func(self) -> None:
         """Handle CONDITIONAL-GO with human review loop.
 
         All logic lives here - the router just checks the verdict state
@@ -380,7 +382,7 @@ class BandAIFlow(Flow[BandAIState]):
 
         self.state.current_contract_index += 1
 
-    @router(handle_conditional_go)
+    @router(handle_conditional_go_func)
     def route_after_conditional(self) -> str:
         """Loop back for another review iteration, or move on."""
         if self.state.current_verdict is not None:
