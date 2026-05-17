@@ -7,7 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
-from crewai.flow.flow import Flow, listen, persist, router, start  # type: ignore
+from crewai.flow.flow import Flow, listen, router, start  # type: ignore
+from crewai.flow.persistence import persist  # type: ignore
 
 from bandai.crews.compliance_crew import ComplianceCrew
 from bandai.crews.proposal_crew import ProposalCrew
@@ -115,7 +116,7 @@ def _ask_human_on_conditional_go(
 # BandAI Flow
 
 
-@persist
+@persist()
 class BandAIFlow(Flow[BandAIState]):
     """
     CrewAI Flow that orchestrates the full BandAI procurement pipeline.

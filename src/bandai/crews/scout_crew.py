@@ -10,7 +10,7 @@ import yaml
 from crewai import Agent, Crew, Process, Task  # type: ignore
 from crewai.project import CrewBase, agent, crew, task  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
-from crewai.task_output import TaskOutput  # type: ignore
+from crewai import TaskOutput  # type: ignore
 
 from bandai.config import BANDI_PORTALS, get_llm, PORTAL_WEIGHTS, _DEFAULT_PORTAL_WEIGHT
 from bandai.knowledge_sources import get_all_knowledge_sources
