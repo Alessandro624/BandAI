@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Tuple
 
 from crewai import Agent, Crew, Process, Task  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
@@ -68,7 +67,7 @@ class ComplianceCrew:
     agents: list[BaseAgent]
     tasks: list[Task]
 
-    def build(self, contract_summary: str) -> Tuple[Crew, Task]:
+    def build(self, contract_summary: str) -> tuple[Crew, Task]:
         """Build and return (crew, verdict_task) for a specific contract."""
         ac = load_yaml_config("agents_compliance.yaml")
         tc = load_yaml_config("tasks_compliance.yaml")
@@ -158,7 +157,7 @@ class ComplianceCrew:
         original_verdict: ComplianceVerdict,
         human_note: str,
         iteration: int = 1,
-    ) -> Tuple[Crew, Task]:
+    ) -> tuple[Crew, Task]:
         """Build a review crew for CONDITIONAL-GO re-evaluation."""
         ac = load_yaml_config("agents_compliance.yaml")
         tc = load_yaml_config("tasks_compliance.yaml")

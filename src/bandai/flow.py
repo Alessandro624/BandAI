@@ -16,8 +16,6 @@ from bandai.crews.scout_crew import ScoutCrew
 from bandai.models import ComplianceVerdict, FinalProposal
 from bandai.config import IMPLICIT_NO_GO_KEYWORDS, _MAX_REVIEW_ITERATIONS
 
-from typing import Tuple
-
 log = logging.getLogger("bandai.flow")
 
 OUTPUT_DIR = Path("output")
@@ -39,7 +37,7 @@ class BandAIState(BaseModel):
 
     # Phase 2: Compliance
     current_contract_index: int = 0
-    approved_contracts: list[Tuple[dict, dict]] = Field(default_factory=list)
+    approved_contracts: list[tuple[dict, dict]] = Field(default_factory=list)
     no_go_log: list[dict] = Field(default_factory=list)
     current_verdict: dict | None = None
     current_contract: dict | None = None

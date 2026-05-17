@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import json
-from typing import Tuple
 
 from crewai import Agent, Crew, Process, Task  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
@@ -86,7 +85,7 @@ class ScoutCrew:
     agents: list[BaseAgent]
     tasks: list[Task]
 
-    def build(self, user_preferences: str) -> Tuple[Crew, Task]:
+    def build(self, user_preferences: str) -> tuple[Crew, Task]:
         """Build and return (crew_instance, preference_filter_task)."""
         # Crawler agents + tasks (one per portal, all async)
         crawler_agents: list[Agent] = []

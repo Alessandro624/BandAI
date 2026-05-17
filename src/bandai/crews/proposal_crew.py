@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Tuple
 
 from crewai import Agent, Crew, Process, Task  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
@@ -36,7 +35,7 @@ class ProposalCrew:
         self,
         contract_summary: str,
         total_word_limit: int = 3000,
-    ) -> Tuple[Crew, Task]:
+    ) -> tuple[Crew, Task]:
         """Build and return (crew, proposal_task) for a specific contract."""
         ac = load_yaml_config("agents_proposal.yaml")
         tc = load_yaml_config("tasks_proposal.yaml")
