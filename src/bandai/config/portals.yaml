@@ -1,0 +1,29 @@
+# Procurement portal definitions for the Scout crew.
+# Each portal entry defines the source for tender discovery.
+#
+# - name: Human-readable identifier used throughout the pipeline.
+# - base_url: Entry URL for the portal.
+# - reliability: Weight in [0.0, 1.0] used by the Resolution Agent
+#   during consensus polling. Higher = more authoritative.
+# - country_filter: Optional ISO country code filter (e.g. "IT").
+#
+# To add a new portal, append an entry below. It will be picked up
+# automatically by the Scout crew on the next run.
+
+portals:
+  - name: "ANAC / Simog"
+    base_url: "https://www.anticorruzione.it/-/bandi-di-gara"
+    reliability: 1.00
+
+  - name: "TED (EU)"
+    base_url: "https://www.ted.europa.eu/en/search/result"
+    reliability: 0.90
+    country_filter: "IT"
+
+  - name: "MePA"
+    base_url: "https://www.acquistinretepa.it/opencms/opencms/main/pa/"
+    reliability: 0.85
+
+  - name: "Sardegna CAT"
+    base_url: "https://www.sardegacat.it/eprocurement/createWorkspace.do"
+    reliability: 0.75
