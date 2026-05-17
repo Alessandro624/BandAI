@@ -1,3 +1,33 @@
-from .models import RawContract, ResolvedContract, AdvocateAnalysis, AuditorChallenge, ComplianceVerdict, DepartmentBid, AuctionResult, FinalProposal
+from .models import (
+    AdvocateAnalysis,
+    AuditorChallenge,
+    AuctionResult,
+    ComplianceVerdict,
+    DepartmentBid,
+    FinalProposal,
+    RawContract,
+    ResolvedContract,
+)
+from .knowledge import (
+    CompanyProfile,
+    DepartmentProfile,
+    PastContract,
+    load_company_profile,
+)
 
-__all__ = ["RawContract", "ResolvedContract", "AdvocateAnalysis", "AuditorChallenge", "ComplianceVerdict", "DepartmentBid", "AuctionResult", "FinalProposal"]
+__all__ = [
+    # Pipeline models
+    "RawContract",
+    "ResolvedContract",
+    "AdvocateAnalysis",
+    "AuditorChallenge",
+    "ComplianceVerdict",
+    "DepartmentBid",
+    "AuctionResult",
+    "FinalProposal",
+    # Knowledge models
+    "CompanyProfile",
+    "DepartmentProfile",
+    "PastContract",
+    "load_company_profile",
+]

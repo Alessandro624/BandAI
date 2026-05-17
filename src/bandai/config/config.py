@@ -1,83 +1,268 @@
 from __future__ import annotations
+
+import logging
 import os
-from dataclasses import dataclass, field
-from dotenv import load_dotenv
-from crewai import LLM  # type: ignore
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-load_dotenv()
+from pydantic import BaseModel, Field
 
-_PROVIDER_BASE_URL = os.getenv("PROVIDER_BASE_URL", "https://openrouter.ai/api/v1")
-_API_KEY = os.getenv("API_KEY", "your_api_key_here")
+if TYPE_CHECKING:
+    from crewai.llms.base_llm import BaseLLM  # type: ignore
 
-# TODO: Choose a reasoing-heavy model
-_MAIN_MODEL = os.getenv("MAIN_MODEL", "openrouter/free")
-_MAIN_TEMPERATURE = float(os.getenv("MAIN_TEMPERATURE", "0.3"))
-_MAIN_MAX_TOKENS = int(os.getenv("MAIN_MAX_TOKENS", "4096"))
+log = logging.getLogger(__name__)
+logging.getLogger("opentelemetry.attributes").setLevel(logging.ERROR)
 
-# TODO: Choose a lightweight model for the parallel agents
-_FAST_MODEL = os.getenv("FAST_MODEL", "openrouter/free")
-_FAST_TEMPERATURE = float(os.getenv("FAST_TEMPERATURE", "0.3"))
-_FAST_MAX_TOKENS = int(os.getenv("FAST_MAX_TOKENS", "4096"))
+_CFG = Path(__file__).parent
 
 
-def get_llm(fast: bool = False) -> LLM:
-    """
-    Returns a CrewAI LLm object pointing at Provider.
+# Provider Profile Models
 
-    Args:
-        fast (bool): If True, returns a lightweight model for parallel agents.
-                     If False, returns a reasoning-heavy model for the main agent.
-    """
+
+class LLMProfile(BaseModel):
+    """Configuration for a single LLM model slot (main or fast)."""
+
+    model: str
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=4096, ge=1, le=131072)
+
+
+class ProviderProfile(BaseModel):
+    """Configuration for a complete LLM provider."""
+
+    name: str
+    description: str = ""
+    base_url: str
+    main: LLMProfile
+    fast: LLMProfile
+    env_key: str = "API_KEY"
+
+    @property
+    def main_model(self) -> str:
+        """Full model identifier in provider/model format."""
+        if "/" in self.main.model:
+            return self.main.model
+        return f"{self.name}/{self.main.model}"
+
+    @property
+    def fast_model(self) -> str:
+        """Full model identifier in provider/model format."""
+        if "/" in self.fast.model:
+            return self.fast.model
+        return f"{self.name}/{self.fast.model}"
+
+
+# Built-in Provider Profiles
+
+PROVIDERS: dict[str, ProviderProfile] = {
+    "openrouter": ProviderProfile(
+        name="openrouter",
+        description="OpenRouter - multi-provider routing (supports OpenAI, Anthropic, Google, etc.)",
+        base_url="https://openrouter.ai/api/v1",
+        main=LLMProfile(model="anthropic/claude-sonnet-4-20250514", temperature=0.3, max_tokens=4096),
+        fast=LLMProfile(model="openai/gpt-4o-mini", temperature=0.3, max_tokens=4096),
+        env_key="OPENROUTER_API_KEY",
+    ),
+    "anthropic": ProviderProfile(
+        name="anthropic",
+        description="Anthropic - direct API access",
+        base_url="https://api.anthropic.com/v1",
+        main=LLMProfile(model="claude-sonnet-4-20250514", temperature=0.3, max_tokens=4096),
+        fast=LLMProfile(model="claude-haiku-3-5-20241022", temperature=0.3, max_tokens=4096),
+        env_key="ANTHROPIC_API_KEY",
+    ),
+    "openai": ProviderProfile(
+        name="openai",
+        description="OpenAI - direct API access",
+        base_url="https://api.openai.com/v1",
+        main=LLMProfile(model="gpt-4o", temperature=0.3, max_tokens=4096),
+        fast=LLMProfile(model="gpt-4o-mini", temperature=0.3, max_tokens=4096),
+        env_key="OPENAI_API_KEY",
+    ),
+    "ollama": ProviderProfile(
+        name="ollama",
+        description="Ollama - local LLM server",
+        base_url="http://localhost:11434/v1",
+        main=LLMProfile(model="llama3", temperature=0.3, max_tokens=4096),
+        fast=LLMProfile(model="llama3", temperature=0.3, max_tokens=4096),
+        env_key="",
+    ),
+}
+
+
+# Active Configuration
+
+
+def get_active_provider() -> ProviderProfile:
+    """Return the active provider profile based on LLM_PROVIDER env var."""
+    provider_name = os.getenv("LLM_PROVIDER", "openrouter")
+    if provider_name not in PROVIDERS:
+        available = ", ".join(sorted(PROVIDERS.keys()))
+        raise ValueError(f"Unknown LLM_PROVIDER '{provider_name}'. " f"Available providers: {available}")
+    return PROVIDERS[provider_name]
+
+
+def get_api_key() -> str:
+    """Return the API key for the active provider."""
+    provider = get_active_provider()
+
+    # Provider-specific key takes priority
+    if provider.env_key:
+        key = os.getenv(provider.env_key, "")
+        if key and key != f"your_{provider.env_key.lower()}_here":
+            return key
+
+    # Generic fallback
+    key = os.getenv("API_KEY", "")
+    if key and key != "your_api_key_here":
+        return key
+
+    available_msg = ""
+    if provider.env_key:
+        available_msg = f" Set {provider.env_key} or API_KEY in your .env file."
+    else:
+        available_msg = " No API key required for this provider."
+
+    raise ValueError(f"No API key configured for provider '{provider.name}'.{available_msg}")
+
+
+def get_llm(fast: bool = False) -> BaseLLM:  # type: ignore[valid-type]
+    """Return a CrewAI LLM object for the active provider."""
+    from crewai import LLM  # type: ignore
+
+    provider = get_active_provider()
+
+    # Allow overriding base URL via env var (useful for local servers)
+    base_url = os.getenv("PROVIDER_BASE_URL", provider.base_url)
+
+    # Start from provider profile, then apply optional env overrides
+    profile = provider.fast if fast else provider.main
+
+    # ENV overrides for model specs
+    env_model = os.getenv("FAST_MODEL" if fast else "MAIN_MODEL")
+    if env_model:
+        # If env contains provider prefix (provider/model), use as-is; else use model name
+        profile_model = env_model
+    else:
+        profile_model = profile.model
+
+    # Numeric overrides
+    env_temp = os.getenv("FAST_TEMPERATURE" if fast else "MAIN_TEMPERATURE")
+    if env_temp is not None:
+        try:
+            profile_temperature = float(env_temp)
+        except ValueError:
+            profile_temperature = profile.temperature
+    else:
+        profile_temperature = profile.temperature
+
+    env_max = os.getenv("FAST_MAX_TOKENS" if fast else "MAIN_MAX_TOKENS")
+    if env_max is not None:
+        try:
+            profile_max = int(env_max)
+        except ValueError:
+            profile_max = profile.max_tokens
+    else:
+        profile_max = profile.max_tokens
+
+    api_key = get_api_key() if provider.env_key else None
+
+    # If profile_model already contains provider prefix, use it; otherwise combine with provider.name
+    model_id = profile_model if "/" in profile_model else f"{provider.name}/{profile_model}"
+
     return LLM(
-        model=_FAST_MODEL if fast else _MAIN_MODEL,
-        api_key=_API_KEY,
-        base_url=_PROVIDER_BASE_URL,
-        temperature=_FAST_TEMPERATURE if fast else _MAIN_TEMPERATURE,
-        max_tokens=_FAST_MAX_TOKENS if fast else _MAIN_MAX_TOKENS,
+        model=model_id,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=profile_temperature,
+        max_tokens=profile_max,
     )
 
 
-# TODO: move this to a separate file so its easier to modify without affecting the main agent code
-BANDI_PORTALS: list[dict] = [
-    {
-        "name": "ANAC / Simog",
-        "base_url": "https://www.anticorruzione.it/-/bandi-di-gara",
-        "reliability": 1.00,
-        "country_filter": None,
-    },
-    {
-        "name": "TED (EU)",
-        "base_url": "https://www.ted.europa.eu/en/search/result",
-        "reliability": 0.90,
-        "country_filter": "IT",
-    },
-    {
-        "name": "MePA",
-        "base_url": "https://www.acquistinretepa.it/opencms/opencms/main/pa/",
-        "reliability": 0.85,
-        "country_filter": None,
-    },
-    {
-        "name": "Sardegna CAT",
-        "base_url": "https://www.sardegacat.it/eprocurement/createWorkspace.do",
-        "reliability": 0.75,
-        "country_filter": None,
-    },
-]
+def get_embedder() -> dict | None:
+    """Return an embedder configuration dict for Crew(embedder=...)."""
+    provider = os.getenv("EMBEDDER_PROVIDER")
+    if not provider:
+        return None
 
-PORTAL_WEIGHTS: dict[str, float] = {p["name"]: p["reliability"] for p in BANDI_PORTALS}
-_DEFAULT_PORTAL_WEIGHT = float(os.getenv("DEFAULT_PORTAL_WEIGHT", "0.5"))
+    model = os.getenv("EMBEDDER_MODEL", "")
+    base_url = os.getenv("EMBEDDER_BASE_URL", "")
+    api_key = os.getenv("EMBEDDER_API_KEY", "")
 
-if _DEFAULT_PORTAL_WEIGHT < 0.0 or _DEFAULT_PORTAL_WEIGHT > 1.0:
-    _DEFAULT_PORTAL_WEIGHT = 0.5
+    # If model is empty, fall back to sensible defaults per provider
+    if not model:
+        if provider == "ollama":
+            model = "nomic-embed-text:latest"
+        elif provider == "openai":
+            model = "text-embedding-3-large"
+        else:
+            model = "default-embed-model"
+
+    embedder: dict = {"provider": provider, "config": {"model_name": model}}
+    if base_url:
+        embedder["config"]["url"] = base_url
+    if api_key:
+        embedder["config"]["api_key"] = api_key
+
+    return embedder
 
 
-def portal_weight(portal_name: str) -> float:
-    return PORTAL_WEIGHTS.get(portal_name, _DEFAULT_PORTAL_WEIGHT)
+def get_memory() -> "Memory | bool":  # type: ignore[valid-type]
+    """Return a CrewAI Memory object wired to the active provider."""
+
+    if os.getenv("DISABLE_MEMORY", "false").lower() in ("1", "true", "yes"):
+        return False  # type: ignore[return-value]
+
+    from crewai.memory.unified_memory import Memory  # type: ignore
+
+    # Memory uses the fast model for its analysis LLM (scope inference,
+    # importance scoring, consolidation).  The model ID must match
+    # whatever the active provider expects.
+    memory_llm = get_llm(fast=True)
+
+    return Memory(
+        llm=memory_llm,
+        embedder=get_embedder(),
+    )
 
 
-_MAX_REVIEW_ITERATIONS = int(os.getenv("MAX_REVIEW_ITERATIONS", "5"))  # to prevent infinite loops in the review process
-IMPLICIT_NO_GO_KEYWORDS = [
+def validate_config() -> list[str]:
+    """Validate the runtime configuration and return a list of errors."""
+    errors: list[str] = []
+
+    # Check provider
+    provider_name = os.getenv("LLM_PROVIDER", "openrouter")
+    if provider_name not in PROVIDERS:
+        available = ", ".join(sorted(PROVIDERS.keys()))
+        errors.append(f"[LLM_PROVIDER] Unknown provider '{provider_name}'. " f"Available: {available}")
+        return errors  # can't continue without a valid provider
+
+    # Check API key
+    provider = PROVIDERS[provider_name]
+    if provider.env_key:
+        key = os.getenv(provider.env_key, "")
+        generic_key = os.getenv("API_KEY", "")
+        if (not key or key == f"your_{provider.env_key.lower()}_here") and (not generic_key or generic_key == "your_api_key_here"):
+            errors.append(f"[{provider.env_key}] No API key set. " f"Set {provider.env_key} or API_KEY in your .env file.")
+
+    # Check knowledge file (project_root/knowledge/company_profile.json)
+    knowledge_path = Path(__file__).parent.parent.parent.parent / "knowledge" / "company_profile.json"
+    if not knowledge_path.exists():
+        errors.append(f"[knowledge] Company profile not found at {knowledge_path}. " "Create it based on the template.")
+
+    # Check portals config
+    portals_path = Path(__file__).parent / "portals.yaml"
+    if not portals_path.exists():
+        errors.append(f"[portals] Portal config not found at {portals_path}. " "The project requires at least one portal definition.")
+
+    return errors
+
+
+# Review Loop Limits
+_MAX_REVIEW_ITERATIONS = int(os.getenv("MAX_REVIEW_ITERATIONS", "5"))
+
+# Implicit NO-GO Keywords
+IMPLICIT_NO_GO_KEYWORDS: list[str] = [
     # Italian
     "non ho",
     "non abbiamo",
@@ -98,7 +283,7 @@ IMPLICIT_NO_GO_KEYWORDS = [
     "non partecipiamo",
     "ritiro",
     "ritiriamo",
-    # English (in case)
+    # English
     "we don't have",
     "we can't",
     "impossible",
@@ -106,43 +291,3 @@ IMPLICIT_NO_GO_KEYWORDS = [
     "stop",
     "quit",
 ]
-
-
-@dataclass
-class CompanyProfile:
-    name: str = "BandAI"
-    vat_number: str = "IT12345678901"
-    ateco_codes: list[str] = field(default_factory=lambda: ["62.01.09", "62.02.00"])
-    certifications: list[str] = field(default_factory=lambda: ["ISO 9001:2015", "ISO 27001:2022", "ISO 20000-1:2018", "AgID Qualification Cloud (IaaS/PaaS)"])
-    turnover_last_3y_eur: list[float] = field(default_factory=lambda: [2_100_000.0, 2_450_000.0, 2_800_000.0])
-    employees: int = 28
-    departments: list[str] = field(default_factory=lambda: ["Cloud Infrastructure", "Cybersecurity", "Software Development", "Customer Support & SLA Management", "Project Management Office"])
-    past_public_contracts: list[dict] = field(
-        default_factory=lambda: [
-            {
-                "title": "AI Consulting for Public Sector",
-                "value_eur": 150_000.0,
-                "cpv_codes": ["72000000"],
-                "year": 2022,
-                "authority": "Comune di Milano",
-                "topics": ["AI consulting", "public sector"],
-            },
-            {
-                "title": "Data Analysis for Municipal Services",
-                "value_eur": 80_000.0,
-                "cpv_codes": ["72200000"],
-                "year": 2021,
-                "authority": "Comune di Milano",
-                "topics": ["data analysis", "public services"],
-            },
-        ]
-    )
-    max_bid_value_eur: float = 1_500_000.0
-
-    @property
-    def knowledge_file(self) -> str:
-        """Path to the knowledge base file (relative to the project root)"""
-        return f"knowledge/{self.name.replace(' ', '_').lower()}_profile.json"
-
-
-COMPANY = CompanyProfile()

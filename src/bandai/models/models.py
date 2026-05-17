@@ -2,8 +2,12 @@ from __future__ import annotations
 from typing import Literal
 from pydantic import BaseModel, Field
 
+# Scouting Models
+
 
 class RawContract(BaseModel):
+    """Unprocessed tender notice as scraped from a portal."""
+
     portal: str
     url: str
     title: str
@@ -16,6 +20,8 @@ class RawContract(BaseModel):
 
 
 class ResolvedContract(BaseModel):
+    """Deduplicated, canonical tender record with consensus metadata."""
+
     canonical_contract_id: str
     title: str
     contracting_authority: str
@@ -27,7 +33,12 @@ class ResolvedContract(BaseModel):
     canonical_url: str
 
 
+# Compliance Models
+
+
 class AdvocateAnalysis(BaseModel):
+    """Optimistic assessment of the company's ability to meet tender requirements."""
+
     requirements_met: list[str]
     requirements_potentially_met: list[str]
     risk_mitigations: list[str]
@@ -37,6 +48,8 @@ class AdvocateAnalysis(BaseModel):
 
 
 class AuditorChallenge(BaseModel):
+    """Skeptical rebuttal of the Advocate's analysis, identifying risks."""
+
     hard_blockers: list[str]
     soft_risks: list[str]
     advocate_overestimates: list[str]
@@ -46,6 +59,8 @@ class AuditorChallenge(BaseModel):
 
 
 class ComplianceVerdict(BaseModel):
+    """Final bid/no-bid decision with structured rationale."""
+
     bid_decision: Literal["GO", "NO-GO", "CONDITIONAL-GO"]
     conditions: list[str] = Field(default_factory=list)
     key_risks: list[str]
@@ -55,7 +70,12 @@ class ComplianceVerdict(BaseModel):
     verdict_rationale: str
 
 
+# Proposal Models
+
+
 class DepartmentBid(BaseModel):
+    """A department's bid for inclusion in the proposal."""
+
     department: str
     headline_capability: str
     evidence: list[str]
@@ -63,12 +83,17 @@ class DepartmentBid(BaseModel):
     suggested_section: str
     relevance_score: float = Field(..., ge=0.0, le=1.0)
     evidence_quality_score: float = Field(
-        ..., ge=0.0, le=1.0, description=("1.0 = verifiable certs + signed case studies + quantified KPIs; 0.5 = partial evidence; 0.0 = unsubstanciated claims only")
+        ...,
+        ge=0.0,
+        le=1.0,
+        description=("1.0 = verifiable certs + signed case studies + quantified KPIs; " "0.5 = partial evidence; 0.0 = unsubstantiated claims only"),
     )
     word_budget: int
 
 
 class AuctionResult(BaseModel):
+    """Outcome of the departmental auction, selecting winning bids."""
+
     winning_bids: list[DepartmentBid]
     rejected_bids: list[str]
     section_allocation: dict[str, str]
@@ -77,6 +102,8 @@ class AuctionResult(BaseModel):
 
 
 class FinalProposal(BaseModel):
+    """Complete proposal document ready for submission."""
+
     tender_ref: str
     executive_summary: str
     sections: dict[str, str]

@@ -81,10 +81,10 @@ human_review_task:
     note provides a concrete, verifiable resolution (YES / PARTIAL / NO).
 
     STEP 2 - DECIDE:
-      - ALL hard blockers resolved → GO
-      - SOME resolved → CONDITIONAL-GO, update conditions to only unresolved ones
-      - NONE resolved or note is vague → keep original verdict unchanged
-      - Abandonment language detected → NO-GO (see STEP 0)
+      - ALL hard blockers resolved -> GO
+      - SOME resolved -> CONDITIONAL-GO, update conditions to only unresolved ones
+      - NONE resolved or note is vague -> keep original verdict unchanged
+      - Abandonment language detected -> NO-GO (see STEP 0)
 
     STEP 3 - Set verdict_rationale explaining exactly what changed and why.
     Iteration context: this is attempt {iteration} of {max_iterations}.
