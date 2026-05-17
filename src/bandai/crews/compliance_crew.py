@@ -5,18 +5,19 @@ from pathlib import Path
 
 import yaml
 from crewai import Agent, Crew, Process, Task  # type: ignore
-from crewai.project import CrewBase, crew  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
 from crewai import TaskOutput  # type: ignore
 
-from bandai.config import get_llm, _MAX_REVIEW_ITERATIONS
+from bandai.config import get_llm, get_embedder, get_memory, _MAX_REVIEW_ITERATIONS
 from bandai.knowledge_sources import get_all_knowledge_sources
 from bandai.models import AdvocateAnalysis, AuditorChallenge, ComplianceVerdict, load_company_profile
 from bandai.tools.crawler_tools import ComplianceCheckerTool
 
+from typing import Tuple
+
 log = logging.getLogger(__name__)
 
-_CFG = Path(__file__).parent.parent / "config"
+_CFG = Path(__file__).resolve().parents[1] / "config"
 
 
 def _load_yaml(filename: str) -> dict:
@@ -26,7 +27,7 @@ def _load_yaml(filename: str) -> dict:
 # Guardrails
 
 
-def _validate_verdict(result: TaskOutput) -> tuple[bool, TaskOutput]:
+def _validate_verdict(result: TaskOutput):
     """Ensure the compliance verdict has a valid bid_decision."""
     try:
         verdict = result.pydantic
@@ -45,7 +46,7 @@ def _validate_verdict(result: TaskOutput) -> tuple[bool, TaskOutput]:
     return (True, result)
 
 
-def _validate_review_verdict(result: TaskOutput) -> tuple[bool, TaskOutput]:
+def _validate_review_verdict(result: TaskOutput):
     """Validate the human review re-evaluation verdict."""
     return _validate_verdict(result)
 
@@ -53,7 +54,6 @@ def _validate_review_verdict(result: TaskOutput) -> tuple[bool, TaskOutput]:
 # Crew Class
 
 
-@CrewBase
 class ComplianceCrew:
     """
     Compliance Crew - runs a structured advocate/auditor debate to produce
@@ -63,10 +63,7 @@ class ComplianceCrew:
     agents: list[BaseAgent]
     tasks: list[Task]
 
-    agents_config = "config/agents_compliance.yaml"
-    tasks_config = "config/tasks_compliance.yaml"
-
-    def build(self, contract_summary: str) -> tuple[Crew, Task]:
+    def build(self, contract_summary: str) -> Tuple[Crew, Task]:
         """Build and return (crew, verdict_task) for a specific contract."""
         ac = _load_yaml("agents_compliance.yaml")
         tc = _load_yaml("tasks_compliance.yaml")
@@ -144,8 +141,9 @@ class ComplianceCrew:
             tasks=[advocate_task, auditor_task, verdict_task],
             process=Process.sequential,
             verbose=True,
-            memory=True,
+            memory=get_memory(),
             knowledge_sources=get_all_knowledge_sources(),
+            embedder=get_embedder(),
         )
         return built_crew, verdict_task
 
@@ -155,7 +153,7 @@ class ComplianceCrew:
         original_verdict: ComplianceVerdict,
         human_note: str,
         iteration: int = 1,
-    ) -> tuple[Crew, Task]:
+    ) -> Tuple[Crew, Task]:
         """Build a review crew for CONDITIONAL-GO re-evaluation."""
         ac = _load_yaml("agents_compliance.yaml")
         tc = _load_yaml("tasks_compliance.yaml")
@@ -191,10 +189,6 @@ class ComplianceCrew:
             process=Process.sequential,
             verbose=True,
             knowledge_sources=get_all_knowledge_sources(),
+            embedder=get_embedder(),
         )
         return review_crew, review_task
-
-    @crew
-    def crew(self) -> Crew:
-        """Creates the Compliance Crew."""
-        return self.build(contract_summary="")[0]

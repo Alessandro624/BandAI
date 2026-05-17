@@ -5,24 +5,24 @@ from pathlib import Path
 
 import yaml
 from crewai import Agent, Crew, Process, Task  # type: ignore
-from crewai.project import CrewBase, crew  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
 
-from bandai.config import get_llm
+from bandai.config import get_llm, get_embedder, get_memory
 from bandai.knowledge_sources import get_all_knowledge_sources
 from bandai.models import (
     AuctionResult,
     CompanyProfile,
     DepartmentBid,
-    DepartmentProfile,
     FinalProposal,
     load_company_profile,
 )
 from bandai.tools.crawler_tools import ProposalWriterTool
 
+from typing import Tuple
+
 log = logging.getLogger(__name__)
 
-_CFG = Path(__file__).parent.parent / "config"
+_CFG = Path(__file__).resolve().parents[1] / "config"
 
 
 def _load_yaml(filename: str) -> dict:
@@ -37,7 +37,6 @@ def _load_company() -> CompanyProfile:
 # Crew Class
 
 
-@CrewBase
 class ProposalCrew:
     """
     Proposal Crew - runs an auction to build the optimal tender proposal.
@@ -46,14 +45,11 @@ class ProposalCrew:
     agents: list[BaseAgent]
     tasks: list[Task]
 
-    agents_config = "config/agents_proposal.yaml"
-    tasks_config = "config/tasks_proposal.yaml"
-
     def build(
         self,
         contract_summary: str,
         total_word_limit: int = 3000,
-    ) -> tuple[Crew, Task]:
+    ) -> Tuple[Crew, Task]:
         """Build and return (crew, proposal_task) for a specific contract."""
         ac = _load_yaml("agents_proposal.yaml")
         tc = _load_yaml("tasks_proposal.yaml")
@@ -151,12 +147,8 @@ class ProposalCrew:
             tasks=all_tasks,
             process=Process.sequential,
             verbose=True,
-            memory=True,
+            memory=get_memory(),
             knowledge_sources=get_all_knowledge_sources(),
+            embedder=get_embedder(),
         )
         return built_crew, proposal_task
-
-    @crew
-    def crew(self) -> Crew:
-        """Creates the Proposal Crew."""
-        return self.build(contract_summary="")[0]
