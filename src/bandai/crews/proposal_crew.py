@@ -1,12 +1,26 @@
 from __future__ import annotations
 
-import yaml
+import logging
 from pathlib import Path
-from crewai import Agent, Crew, Process, Task  # type: ignore[import]
 
-from bandai.config import COMPANY, get_llm
-from bandai.models import AuctionResult, DepartmentBid, FinalProposal
+import yaml
+from crewai import Agent, Crew, Process, Task  # type: ignore
+from crewai.project import CrewBase, crew  # type: ignore
+from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
+
+from bandai.config import get_llm
+from bandai.knowledge_sources import get_all_knowledge_sources
+from bandai.models import (
+    AuctionResult,
+    CompanyProfile,
+    DepartmentBid,
+    DepartmentProfile,
+    FinalProposal,
+    load_company_profile,
+)
 from bandai.tools.crawler_tools import ProposalWriterTool
+
+log = logging.getLogger(__name__)
 
 _CFG = Path(__file__).parent.parent / "config"
 
@@ -15,90 +29,46 @@ def _load_yaml(filename: str) -> dict:
     return yaml.safe_load((_CFG / filename).read_text(encoding="utf-8"))
 
 
-# TODO: inject from company knowledge base instead of hardcoding here
-DEPARTMENT_PROFILES: dict[str, dict] = {
-    "Cloud Infrastructure": {
-        "capabilities": [
-            "Design and management of multi-cloud environments (AWS, Azure, GCP)",
-            "AgID-qualified cloud migration for Italian PA",
-            "99.99% SLA on managed infrastructure services",
-        ],
-        "certifications": ["ISO 20000-1:2018", "AgID Qualificazione Cloud (IaaS/PaaS)"],
-        "case_studies": [
-            "Migrazione documentale Comune di Cagliari (2022) - €180k, zero downtime",
-        ],
-        "kpis": {"uptime_sla": "99.99%", "avg_migration_weeks": 8},
-    },
-    "Cybersecurity": {
-        "capabilities": [
-            "VAPT (Vulnerability Assessment & Penetration Testing)",
-            "DPO as a Service (GDPR)",
-            "SOC 24/7 with SIEM integration",
-            "NIS2 compliance gap analysis",
-        ],
-        "certifications": ["ISO 27001:2022", "CEH", "OSCP"],
-        "case_studies": [
-            "GDPR remediation ASL Ogliastra (2023) – €95k, 0 audit findings",
-        ],
-        "kpis": {"mttd_minutes": 12, "mttr_hours": 2.5},
-    },
-    "Software Development": {
-        "capabilities": [
-            "Agile/Scrum delivery (2-week sprints)",
-            "Full-stack web & mobile (React, FastAPI, Flutter)",
-            "PA interoperability via ModI / PDND",
-        ],
-        "certifications": ["ISO 9001:2015", "AWS Certified Developer"],
-        "case_studies": [],
-        "kpis": {"defect_rate_percent": 0.8, "on_time_delivery_percent": 94},
-    },
-    "Customer Support & SLA Management": {
-        "capabilities": [
-            "Multi-channel helpdesk (phone, email, chat, ticket)",
-            "SLA-driven escalation with guaranteed response times",
-            "Italian-language L1/L2/L3 support",
-        ],
-        "certifications": ["ISO 20000-1:2018", "ITIL 4 Foundation"],
-        "case_studies": [],
-        "kpis": {"first_contact_resolution_percent": 78, "csat_score": 4.6},
-    },
-    "Project Management Office": {
-        "capabilities": [
-            "PMP-certified project managers",
-            "Full MS Project + Jira tracking",
-            "Risk register and steering committee reporting",
-        ],
-        "certifications": ["PMP", "PRINCE2 Practitioner"],
-        "case_studies": [],
-        "kpis": {"budget_variance_percent": 3.2, "schedule_variance_percent": 4.1},
-    },
-}
+def _load_company() -> CompanyProfile:
+    """Load and cache the company profile from knowledge/."""
+    return load_company_profile()
 
 
+# Crew Class
+
+
+@CrewBase
 class ProposalCrew:
-    """Proposal Crew - runs an auction to build the optimal tender proposal."""
+    """
+    Proposal Crew - runs an auction to build the optimal tender proposal.
+    """
+
+    agents: list[BaseAgent]
+    tasks: list[Task]
+
+    agents_config = "config/agents_proposal.yaml"
+    tasks_config = "config/tasks_proposal.yaml"
 
     def build(
         self,
         contract_summary: str,
         total_word_limit: int = 3000,
     ) -> tuple[Crew, Task]:
-        """
-        Build and return (crew, proposal_task) for a specific contract.
-        proposal_task.output.pydantic is a FinalProposal.
-        """
+        """Build and return (crew, proposal_task) for a specific contract."""
         ac = _load_yaml("agents_proposal.yaml")
         tc = _load_yaml("tasks_proposal.yaml")
 
         dept_agents: list[Agent] = []
         dept_bid_tasks: list[Task] = []
 
-        for dept_name, profile in DEPARTMENT_PROFILES.items():
+        company = _load_company()
+
+        for dept_name, dept_profile in company.departments.items():
             profile_str = (
-                f"Certifications: {profile['certifications']}\n"
-                f"Capabilities  : {profile['capabilities']}\n"
-                f"Case studies  : {profile['case_studies'] or ['None yet']}\n"
-                f"KPIs          : {profile['kpis']}"
+                f"Certifications: {dept_profile.certifications}\n"
+                f"Capabilities  : {dept_profile.capabilities}\n"
+                f"Case studies  : {dept_profile.case_studies or ['None yet']}\n"
+                f"KPIs          : {dept_profile.kpis}"
             )
 
             ag = Agent(
@@ -106,11 +76,13 @@ class ProposalCrew:
                 goal=ac["department_rep"]["goal"].format(dept_name=dept_name),
                 backstory=ac["department_rep"]["backstory"].format(
                     dept_name=dept_name,
-                    company_name=COMPANY.name,
+                    company_name=company.name,
                     dept_profile=profile_str,
                 ),
-                llm=get_llm(fast=True),  # cheap model for dept reps
+                llm=get_llm(fast=True),
                 verbose=True,
+                max_retry_limit=2,
+                respect_context_window=True,
             )
 
             t = Task(
@@ -121,18 +93,22 @@ class ProposalCrew:
                 expected_output=tc["dept_bid_task"]["expected_output"],
                 agent=ag,
                 output_pydantic=DepartmentBid,
-                async_execution=True,  # all dept reps bid in parallel
+                async_execution=True,
             )
 
             dept_agents.append(ag)
             dept_bid_tasks.append(t)
 
+        # Auctioneer evaluates bids
         auctioneer = Agent(
             role=ac["auctioneer"]["role"],
             goal=ac["auctioneer"]["goal"],
             backstory=ac["auctioneer"]["backstory"],
             llm=get_llm(),
             verbose=True,
+            max_retry_limit=2,
+            respect_context_window=True,
+            reasoning=True,  # complex scoring and word budget allocation
         )
         auction_task = Task(
             description=tc["auction_task"]["description"].format(
@@ -141,10 +117,11 @@ class ProposalCrew:
             ),
             expected_output=tc["auction_task"]["expected_output"],
             agent=auctioneer,
-            context=dept_bid_tasks,  # waits for all async dept reps
+            context=dept_bid_tasks,
             output_pydantic=AuctionResult,
         )
 
+        # Proposal Architect writes the final document
         architect = Agent(
             role=ac["proposal_architect"]["role"],
             goal=ac["proposal_architect"]["goal"],
@@ -152,11 +129,13 @@ class ProposalCrew:
             tools=[ProposalWriterTool()],
             llm=get_llm(),
             verbose=True,
+            max_retry_limit=2,
+            respect_context_window=True,
         )
         proposal_task = Task(
             description=tc["proposal_task"]["description"].format(
                 contract_summary=contract_summary,
-                company_name=COMPANY.name,
+                company_name=_load_company().name,
             ),
             expected_output=tc["proposal_task"]["expected_output"],
             agent=architect,
@@ -172,5 +151,12 @@ class ProposalCrew:
             tasks=all_tasks,
             process=Process.sequential,
             verbose=True,
+            memory=True,
+            knowledge_sources=get_all_knowledge_sources(),
         )
         return built_crew, proposal_task
+
+    @crew
+    def crew(self) -> Crew:
+        """Creates the Proposal Crew."""
+        return self.build(contract_summary="")[0]

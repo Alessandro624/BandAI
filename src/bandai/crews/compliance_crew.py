@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-import yaml
+import logging
 from pathlib import Path
-from crewai import Agent, Crew, Process, Task  # type: ignore
 
-from bandai.config import COMPANY, get_llm, _MAX_REVIEW_ITERATIONS
-from bandai.models import AdvocateAnalysis, AuditorChallenge, ComplianceVerdict
+import yaml
+from crewai import Agent, Crew, Process, Task  # type: ignore
+from crewai.project import CrewBase, crew  # type: ignore
+from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
+from crewai.task_output import TaskOutput  # type: ignore
+
+from bandai.config import get_llm, _MAX_REVIEW_ITERATIONS
+from bandai.knowledge_sources import get_all_knowledge_sources
+from bandai.models import AdvocateAnalysis, AuditorChallenge, ComplianceVerdict, load_company_profile
 from bandai.tools.crawler_tools import ComplianceCheckerTool
+
+log = logging.getLogger(__name__)
 
 _CFG = Path(__file__).parent.parent / "config"
 
@@ -15,27 +23,65 @@ def _load_yaml(filename: str) -> dict:
     return yaml.safe_load((_CFG / filename).read_text(encoding="utf-8"))
 
 
+# Guardrails
+
+
+def _validate_verdict(result: TaskOutput) -> tuple[bool, TaskOutput]:
+    """Ensure the compliance verdict has a valid bid_decision."""
+    try:
+        verdict = result.pydantic
+    except Exception:
+        return (False, "Could not parse output as ComplianceVerdict JSON.")
+    if verdict.bid_decision not in ("GO", "NO-GO", "CONDITIONAL-GO"):
+        return (
+            False,
+            f"bid_decision must be GO, NO-GO, or CONDITIONAL-GO; got '{verdict.bid_decision}'.",
+        )
+    if verdict.compliance_score < 0.0 or verdict.compliance_score > 1.0:
+        return (
+            False,
+            f"compliance_score must be between 0.0 and 1.0; got {verdict.compliance_score}.",
+        )
+    return (True, result)
+
+
+def _validate_review_verdict(result: TaskOutput) -> tuple[bool, TaskOutput]:
+    """Validate the human review re-evaluation verdict."""
+    return _validate_verdict(result)
+
+
+# Crew Class
+
+
+@CrewBase
 class ComplianceCrew:
-    """Compliance Crew - runs a structured debate to produce a bid verdict."""
+    """
+    Compliance Crew - runs a structured advocate/auditor debate to produce
+    a bid verdict.
+    """
+
+    agents: list[BaseAgent]
+    tasks: list[Task]
+
+    agents_config = "config/agents_compliance.yaml"
+    tasks_config = "config/tasks_compliance.yaml"
 
     def build(self, contract_summary: str) -> tuple[Crew, Task]:
-        """
-        Build and return (crew, verdict_task) for a specific contract.
-        verdict_task.output.pydantic is a ComplianceVerdict.
-        """
+        """Build and return (crew, verdict_task) for a specific contract."""
         ac = _load_yaml("agents_compliance.yaml")
         tc = _load_yaml("tasks_compliance.yaml")
 
-        # Shared interpolation values
+        company = load_company_profile()
+
         profile_vars = dict(
             contract_summary=contract_summary,
-            company_name=COMPANY.name,
-            certifications=", ".join(COMPANY.certifications),
-            turnover=str(COMPANY.turnover_last_3y_eur),
-            past_contracts=str(COMPANY.past_public_contracts),
+            company_name=company.name,
+            certifications=", ".join(company.certifications),
+            turnover=str(company.turnover_last_3y_eur),
+            past_contracts=str([c.model_dump() for c in company.past_public_contracts]),
         )
 
-        # Advocate
+        # Advocate (optimistic)
         advocate = Agent(
             role=ac["advocate"]["role"],
             goal=ac["advocate"]["goal"],
@@ -43,6 +89,8 @@ class ComplianceCrew:
             tools=[ComplianceCheckerTool()],
             llm=get_llm(),
             verbose=True,
+            max_retry_limit=2,
+            respect_context_window=True,
         )
         advocate_task = Task(
             description=tc["advocate_task"]["description"].format(**profile_vars),
@@ -51,7 +99,7 @@ class ComplianceCrew:
             output_pydantic=AdvocateAnalysis,
         )
 
-        # Auditor (reads Advocate output via context)
+        # Auditor (skeptical) - reads Advocate output via context
         auditor = Agent(
             role=ac["auditor"]["role"],
             goal=ac["auditor"]["goal"],
@@ -59,29 +107,36 @@ class ComplianceCrew:
             tools=[ComplianceCheckerTool()],
             llm=get_llm(),
             verbose=True,
+            max_retry_limit=2,
+            respect_context_window=True,
         )
         auditor_task = Task(
             description=tc["auditor_task"]["description"].format(**profile_vars),
             expected_output=tc["auditor_task"]["expected_output"],
             agent=auditor,
-            context=[advocate_task],  # debate: Auditor reads Advocate
+            context=[advocate_task],
             output_pydantic=AuditorChallenge,
         )
 
-        # Compliance Officer (reads both, issues verdict)
+        # Compliance Officer - synthesises debate into verdict
         compliance_officer = Agent(
             role=ac["compliance_officer"]["role"],
             goal=ac["compliance_officer"]["goal"],
             backstory=ac["compliance_officer"]["backstory"],
             llm=get_llm(),
             verbose=True,
+            max_retry_limit=2,
+            respect_context_window=True,
+            reasoning=True,  # reflect-and-plan for complex legal synthesis
         )
         verdict_task = Task(
             description=tc["verdict_task"]["description"].format(**profile_vars),
             expected_output=tc["verdict_task"]["expected_output"],
             agent=compliance_officer,
-            context=[advocate_task, auditor_task],  # synthesises debate
+            context=[advocate_task, auditor_task],
             output_pydantic=ComplianceVerdict,
+            guardrail=_validate_verdict,
+            guardrail_max_retries=3,
         )
 
         built_crew = Crew(
@@ -89,6 +144,8 @@ class ComplianceCrew:
             tasks=[advocate_task, auditor_task, verdict_task],
             process=Process.sequential,
             verbose=True,
+            memory=True,
+            knowledge_sources=get_all_knowledge_sources(),
         )
         return built_crew, verdict_task
 
@@ -99,6 +156,7 @@ class ComplianceCrew:
         human_note: str,
         iteration: int = 1,
     ) -> tuple[Crew, Task]:
+        """Build a review crew for CONDITIONAL-GO re-evaluation."""
         ac = _load_yaml("agents_compliance.yaml")
         tc = _load_yaml("tasks_compliance.yaml")
 
@@ -108,6 +166,9 @@ class ComplianceCrew:
             backstory=ac["human_input_review_agent"]["backstory"],
             llm=get_llm(),
             verbose=True,
+            max_retry_limit=2,
+            respect_context_window=True,
+            inject_date=True,  # deadline-aware review
         )
 
         review_task = Task(
@@ -120,12 +181,20 @@ class ComplianceCrew:
             expected_output=tc["human_review_task"]["expected_output"],
             agent=reviewer,
             output_pydantic=ComplianceVerdict,
+            guardrail=_validate_review_verdict,
+            guardrail_max_retries=3,
         )
 
-        build_crew = Crew(
+        review_crew = Crew(
             agents=[reviewer],
             tasks=[review_task],
             process=Process.sequential,
             verbose=True,
+            knowledge_sources=get_all_knowledge_sources(),
         )
-        return build_crew, review_task
+        return review_crew, review_task
+
+    @crew
+    def crew(self) -> Crew:
+        """Creates the Compliance Crew."""
+        return self.build(contract_summary="")[0]
