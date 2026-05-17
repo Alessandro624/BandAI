@@ -21,11 +21,6 @@ from bandai.crews.utils import load_yaml_config
 log = logging.getLogger(__name__)
 
 
-def _load_company() -> CompanyProfile:
-    """Load and cache the company profile from knowledge/."""
-    return load_company_profile()
-
-
 # Crew Class
 
 
@@ -49,7 +44,7 @@ class ProposalCrew:
         dept_agents: list[Agent] = []
         dept_bid_tasks: list[Task] = []
 
-        company = _load_company()
+        company = load_company_profile()
 
         for dept_name, dept_profile in company.departments.items():
             profile_str = (
@@ -123,7 +118,7 @@ class ProposalCrew:
         proposal_task = Task(
             description=tc["proposal_task"]["description"].format(
                 contract_summary=contract_summary,
-                company_name=_load_company().name,
+                company_name=company.name,
             ),
             expected_output=tc["proposal_task"]["expected_output"],
             agent=architect,
