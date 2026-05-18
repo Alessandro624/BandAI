@@ -77,7 +77,8 @@ class TenderCrawlerTool(BaseTool):
                 "contract_id": f"tender-{random.randint(1000, 9999)}{i}",
                 "contracting_authority": f"Authority {i}",
                 "deadline": f"2024-0{(i % 9) + 1}-31",
-                "value_euros": random.randint(10000, 1000000),
+                "value_eur": float(random.randint(10000, 1000000)),
+                "cpv_codes": [],
                 "raw_text": f"This is the raw text of mock tender {i}, containing keywords {', '.join(keywords)}.",
             }
             for i in range(1, max_results + 1)

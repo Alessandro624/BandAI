@@ -24,7 +24,7 @@ def validate_json_array(
 
     1. Direct json.loads on the raw text (fast path).
     2. If strip_fences is set, strip markdown code fences then retry.
-    3. Regex extraction ([...] with DOTALL) to handle verbose LLM
+    3. Regex extraction ([...]) to handle verbose LLM
        output where the JSON array is embedded in explanatory text.
        This is the common case when Process.hierarchical wraps
        the Crew Manager's reasoning around the actual payload.
@@ -48,16 +48,25 @@ def validate_json_array(
     except json.JSONDecodeError:
         pass
 
-    # Strategy 2: regex extraction (handles verbose Crew Manager output).
-    match = re.search(r"\[.*\]", raw, re.DOTALL)
-    if match:
-        extracted = match.group()
+    # Strategy 2: fenced JSON extraction (preferred when present).
+    fenced = re.search(r"```(?:json)?\s*(\[[\s\S]*?\])\s*```", raw)
+    if fenced:
+        extracted = fenced.group(1)
         try:
             parsed = json.loads(extracted)
             if isinstance(parsed, list):
                 return (True, extracted)
         except json.JSONDecodeError:
             pass
+
+    # Strategy 3: find the first valid JSON array in the output.
+    for candidate in re.findall(r"\[[\s\S]*?\]", raw):
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, list):
+                return (True, candidate)
+        except json.JSONDecodeError:
+            continue
 
     return (
         False,

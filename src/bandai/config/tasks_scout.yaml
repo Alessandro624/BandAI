@@ -8,9 +8,13 @@ crawl_task:
 
     Return a JSON array of RawContract objects with keys: portal, url, title,
     contract_id, contracting_authority, deadline, value_eur, cpv_codes, raw_text.
+
+    Use the TenderCrawlerTool to perform the search, then return ONLY the raw
+    JSON array produced by the tool. Do NOT include tool call JSON, markdown
+    fences, explanations, or example placeholders like "...".
   expected_output: >
     A JSON array of RawContract dicts. Every field that cannot be found must be
-    set to null rather than omitted.
+    set to null rather than omitted. No extra text before or after the array.
   agent: crawler_agent
 
 resolution_task:
