@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
+from functools import lru_cache
 from typing import Any
 
 from pydantic import BaseModel
+
+from bandai.knowledge_sources import get_company_knowledge_data
 
 log = logging.getLogger(__name__)
 
@@ -34,9 +35,11 @@ class DepartmentProfile(BaseModel):
 
 
 class CompanyProfile(BaseModel):
-    """Complete company procurement profile, loaded from knowledge/.
+    """
+    Complete company procurement profile, loaded from knowledge/.
 
-    This is the single source of truth for company data used across all crews.
+    This is the single source of truth for company data used across
+    all crews.  Fields are validated by Pydantic on load.
     """
 
     name: str
@@ -55,12 +58,27 @@ class CompanyProfile(BaseModel):
         return list(self.departments.keys())
 
 
-def load_company_profile(data: dict[str, Any] | None = None) -> CompanyProfile:
-    """Load and validate the company profile data."""
-    if data is None:
-        from bandai.knowledge_sources import get_company_knowledge_data
+# Loaders
 
-        data = get_company_knowledge_data()
+
+def parse_company_profile(data: dict[str, Any]) -> CompanyProfile:
+    """Validate raw dict data into a CompanyProfile."""
+    try:
+        return CompanyProfile.model_validate(data)
+    except Exception as exc:
+        raise ValueError(f"Invalid company profile data: {exc}") from exc
+
+
+@lru_cache(maxsize=1)
+def load_company_profile() -> CompanyProfile:
+    """
+    Load, validate, and cache the company profile from disk.
+
+    The result is cached for the lifetime of the process so that
+    repeated calls across crew builds do not re-read or re-validate
+    the same file.
+    """
+    data = get_company_knowledge_data()
 
     try:
         profile = CompanyProfile.model_validate(data)
@@ -71,5 +89,10 @@ def load_company_profile(data: dict[str, Any] | None = None) -> CompanyProfile:
             len(profile.past_public_contracts),
         )
         return profile
-    except Exception as e:
-        raise ValueError(f"Invalid company profile data: {e}") from e
+    except Exception as exc:
+        raise ValueError(f"Invalid company profile data: {exc}") from exc
+
+
+def clear_profile_cache() -> None:
+    """Clear the cached company profile. Useful in tests."""
+    load_company_profile.cache_clear()

@@ -12,7 +12,9 @@ from .knowledge import (
     CompanyProfile,
     DepartmentProfile,
     PastContract,
+    clear_profile_cache,
     load_company_profile,
+    parse_company_profile,
 )
 
 __all__ = [
@@ -29,5 +31,7 @@ __all__ = [
     "CompanyProfile",
     "DepartmentProfile",
     "PastContract",
+    "clear_profile_cache",
     "load_company_profile",
+    "parse_company_profile",
 ]
