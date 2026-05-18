@@ -6,7 +6,6 @@ from typing import Callable
 
 from pydantic import BaseModel, Field
 from crewai.flow.flow import Flow, listen, router, start  # type: ignore
-from crewai.flow.persistence import persist  # type: ignore
 
 from bandai.crews.compliance_crew import ComplianceCrew
 from bandai.crews.proposal_crew import ProposalCrew
@@ -87,7 +86,6 @@ class BandAIState(BaseModel):
 # BandAI Flow
 
 
-@persist()
 class BandAIFlow(Flow[BandAIState]):
     """
     CrewAI Flow that orchestrates the full BandAI procurement pipeline.
