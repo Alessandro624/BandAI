@@ -8,7 +8,7 @@ import subprocess
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
-from bandai.config import validate_config, get_active_provider
+from bandai.config import validate_config, get_active_provider, validate_portals
 from bandai.flow import BandAIFlow, BandAIState
 
 logging.basicConfig(
@@ -59,8 +59,30 @@ def _startup_validation() -> None:
             log.error("  - %s", err)
         sys.exit(1)
 
+    # Validate that at least one portal is configured.
+    try:
+        validate_portals()
+    except ValueError as exc:
+        log.error("Portal validation failed: %s", exc)
+        sys.exit(1)
+
     provider = get_active_provider()
     log.info("Provider: %s (%s)", provider.name, provider.description)
+
+
+def _build_stub_contract(contract_id: str) -> dict:
+    """Build a stub contract dict matching the ResolvedContract schema."""
+    return {
+        "canonical_contract_id": contract_id,
+        "title": f"Contratto {contract_id} (manuale)",
+        "contracting_authority": "Da capitolato",
+        "deadline": "Da capitolato",
+        "value_eur": 0,
+        "cpv_codes": [],
+        "canonical_url": f"https://www.anticorruzione.it/contract/{contract_id}",
+        "sources": ["manual"],
+        "consensus_score": 1.0,
+    }
 
 
 def run() -> None:
@@ -85,19 +107,8 @@ def run() -> None:
         state = BandAIState(mode=args.mode)
 
         if args.mode == "propose":
-            # Propose mode: set up a stub contract for compliance + proposal
-            stub = {
-                "canonical_contract_id": args.contract,
-                "title": f"Contratto {args.contract} (manuale)",
-                "contracting_authority": "Da capitolato",
-                "deadline": "Da capitolato",
-                "value_eur": 0,
-                "cpv_codes": [],
-                "canonical_url": f"https://www.anticorruzione.it/contract/{args.contract}",
-            }
-            state.contracts = [stub]
+            state.contracts = [_build_stub_contract(args.contract)]
 
-        # Create and kickoff the flow
         flow = BandAIFlow()
         flow.kickoff(inputs=state.model_dump())
 
