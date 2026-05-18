@@ -15,17 +15,23 @@ from bandai.models import (
     load_company_profile,
 )
 from bandai.tools.crawler_tools import ProposalWriterTool
-from bandai.crews.utils import load_yaml_config
+from bandai.utils import load_yaml_config
 
 log = logging.getLogger(__name__)
 
-
-# Crew Class
+# Maximum number of departments that will be given their own agent.
+# Beyond this limit, the proposal crew becomes unwieldy and may hit
+# LLM rate limits or context window constraints.
+MAX_DEPARTMENTS = 15
 
 
 class ProposalCrew:
     """
     Proposal Crew - runs an auction to build the optimal tender proposal.
+
+    Department representative agents submit bids concurrently (via
+    async_execution=True), the auctioneer scores and selects
+    winners, and the proposal architect writes the final document.
     """
 
     agents: list[BaseAgent]
@@ -40,12 +46,24 @@ class ProposalCrew:
         ac = load_yaml_config("agents_proposal.yaml")
         tc = load_yaml_config("tasks_proposal.yaml")
 
+        # Load company profile once (cached by @lru_cache).
+        company = load_company_profile()
+
+        # Guard against excessive department counts.
+        dept_items = list(company.departments.items())
+        if len(dept_items) > MAX_DEPARTMENTS:
+            log.warning(
+                "Company has %d departments but max is %d. " "Only the first %d will participate in the auction.",
+                len(dept_items),
+                MAX_DEPARTMENTS,
+                MAX_DEPARTMENTS,
+            )
+            dept_items = dept_items[:MAX_DEPARTMENTS]
+
         dept_agents: list[Agent] = []
         dept_bid_tasks: list[Task] = []
 
-        company = load_company_profile()
-
-        for dept_name, dept_profile in company.departments.items():
+        for dept_name, dept_profile in dept_items:
             profile_str = (
                 f"Certifications: {dept_profile.certifications}\n"
                 f"Capabilities  : {dept_profile.capabilities}\n"
@@ -131,7 +149,8 @@ class ProposalCrew:
         built_crew = Crew(
             agents=all_agents,
             tasks=all_tasks,
-            process=Process.sequential,
+            process=Process.hierarchical,
+            manager_llm=get_llm(fast=True),
             verbose=True,
             memory=get_memory(),
             knowledge_sources=get_all_knowledge_sources(),

@@ -1,75 +1,32 @@
 from __future__ import annotations
 
 import logging
-import json
 
 from crewai import Agent, Crew, Process, Task  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
-from crewai import TaskOutput  # type: ignore
 
-from bandai.config import BANDI_PORTALS, get_llm, get_embedder, get_memory, PORTAL_WEIGHTS, _DEFAULT_PORTAL_WEIGHT
+from bandai.config import (
+    BANDI_PORTALS,
+    PORTAL_WEIGHTS,
+    _DEFAULT_PORTAL_WEIGHT,
+    get_llm,
+    get_embedder,
+    get_memory,
+)
+from bandai.guardrails import validate_json_array
 from bandai.knowledge_sources import get_all_knowledge_sources
 from bandai.models import ResolvedContract, load_company_profile
 from bandai.tools.crawler_tools import ContractDetailTool, TenderCrawlerTool
-from bandai.crews.utils import load_yaml_config
+from bandai.utils import load_yaml_config
 
 log = logging.getLogger(__name__)
 
 
 def _build_weight_table() -> str:
+    """Build a human-readable weight table for the resolution prompt."""
     rows = [f"   {name:<22} -> {w:.2f}" for name, w in sorted(PORTAL_WEIGHTS.items(), key=lambda x: -x[1])]
     rows.append(f"   {'(other portals)':<22} -> {_DEFAULT_PORTAL_WEIGHT:.2f}")
     return "\n".join(rows)
-
-
-# Guardrail: validate that resolution output is a JSON array
-
-
-def _validate_resolution_output(result: TaskOutput):
-    """Ensure the resolution agent returns a parseable JSON array."""
-    raw = result.raw.strip()
-
-    # Try to find JSON array bounds in the text (handles markdown and explanations)
-    start_idx = raw.find("[")
-    end_idx = raw.rfind("]")
-
-    if start_idx == -1 or end_idx == -1 or start_idx >= end_idx:
-        return (False, "No JSON array found in response. Ensure output contains '[...]'.")
-
-    json_str = raw[start_idx : end_idx + 1]
-
-    try:
-        parsed = json.loads(json_str)
-        if not isinstance(parsed, list):
-            return (False, "Output must be a JSON array (list), not a single object.")
-        return (True, json_str)
-    except json.JSONDecodeError as e:
-        return (False, f"Extracted text is not valid JSON: {str(e)}. Ensure the array is properly formatted.")
-
-
-def _validate_preference_output(result: TaskOutput):
-    """Ensure the preference filter returns a valid JSON array."""
-    raw = result.raw.strip()
-
-    # Try to find JSON array bounds in the text (handles markdown and explanations)
-    start_idx = raw.find("[")
-    end_idx = raw.rfind("]")
-
-    if start_idx == -1 or end_idx == -1 or start_idx >= end_idx:
-        return (False, "No JSON array found in response. Ensure output contains '[...]'.")
-
-    json_str = raw[start_idx : end_idx + 1]
-
-    try:
-        parsed = json.loads(json_str)
-        if not isinstance(parsed, list):
-            return (False, "Output must be a JSON array (list).")
-        return (True, json_str)
-    except json.JSONDecodeError as e:
-        return (False, f"Extracted text is not valid JSON: {str(e)}. Return a properly formatted JSON array only.")
-
-
-# Crew Class
 
 
 class ScoutCrew:
@@ -77,9 +34,8 @@ class ScoutCrew:
     Scout Crew - discovers and deduplicates Italian public tenders.
 
     Because the number of crawler agents is dynamic (one per portal),
-    we build agents and tasks programmatically rather than using the
-    @agent / @task decorators for the dynamic parts. The @crew
-    decorator is used for the final assembly.
+    we build agents and tasks programmatically.  The hierarchical
+    process enables true parallel crawling of all portals.
     """
 
     agents: list[BaseAgent]
@@ -87,12 +43,16 @@ class ScoutCrew:
 
     def build(self, user_preferences: str) -> tuple[Crew, Task]:
         """Build and return (crew_instance, preference_filter_task)."""
+        ac = load_yaml_config("agents_scout.yaml")
+        tc = load_yaml_config("tasks_scout.yaml")
+
+        # Load company profile once (cached by @lru_cache).
+        company = load_company_profile()
+        ateco_codes_str = ", ".join(company.ateco_codes)
+
         # Crawler agents + tasks (one per portal, all async)
         crawler_agents: list[Agent] = []
         crawl_tasks: list[Task] = []
-
-        ac = load_yaml_config("agents_scout.yaml")
-        tc = load_yaml_config("tasks_scout.yaml")
 
         for portal in BANDI_PORTALS:
             agent_cfg = ac["crawler_agent"]
@@ -117,7 +77,7 @@ class ScoutCrew:
                 description=task_cfg["description"].format(
                     portal_name=portal.name,
                     portal_url=portal.base_url,
-                    ateco_codes=", ".join(load_company_profile().ateco_codes),
+                    ateco_codes=ateco_codes_str,
                 ),
                 expected_output=task_cfg["expected_output"],
                 agent=ag,
@@ -127,7 +87,7 @@ class ScoutCrew:
             crawler_agents.append(ag)
             crawl_tasks.append(t)
 
-        # Resolution Agent + task
+        # Resolution Agent - deduplicates and ranks results
         res_cfg = ac["resolution_agent"]
         res_task_cfg = tc["resolution_task"]
 
@@ -152,11 +112,11 @@ class ScoutCrew:
             agent=resolution_agent,
             context=crawl_tasks,
             output_pydantic=list[ResolvedContract],
-            guardrail=_validate_resolution_output,
+            guardrail=validate_json_array,
             guardrail_max_retries=3,
         )
 
-        # Preference Filter Agent + task
+        # Preference Filter Agent - applies user preferences
         preference_cfg = ac["preference_filter_agent"]
         preference_task_cfg = tc["preference_filter_task"]
 
@@ -177,9 +137,8 @@ class ScoutCrew:
             expected_output=preference_task_cfg["expected_output"],
             agent=preference_filter_agent,
             context=[resolution_task],
-            human_input=True,
             output_pydantic=list[ResolvedContract],
-            guardrail=_validate_preference_output,
+            guardrail=lambda r: validate_json_array(r, strip_fences=True),
             guardrail_max_retries=3,
         )
 
@@ -189,7 +148,8 @@ class ScoutCrew:
         built_crew = Crew(
             agents=all_agents,
             tasks=all_tasks,
-            process=Process.sequential,
+            process=Process.hierarchical,
+            manager_llm=get_llm(fast=True),
             verbose=True,
             memory=get_memory(),
             knowledge_sources=get_all_knowledge_sources(),
