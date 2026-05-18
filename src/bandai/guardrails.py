@@ -17,28 +17,52 @@ def validate_json_array(
     *,
     strip_fences: bool = False,
 ):
-    """Validate that the task output is a parseable JSON array."""
+    """
+    Validate that the task output is a parseable JSON array.
+
+    Tries three strategies in order:
+
+    1. Direct json.loads on the raw text (fast path).
+    2. If strip_fences is set, strip markdown code fences then retry.
+    3. Regex extraction ([...] with DOTALL) to handle verbose LLM
+       output where the JSON array is embedded in explanatory text.
+       This is the common case when Process.hierarchical wraps
+       the Crew Manager's reasoning around the actual payload.
+    """
     raw = result.raw.strip()
 
     if strip_fences:
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
         raw = raw.strip()
+
+    # Strategy 1: direct parse.
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return (
-            False,
-            "Output is not valid JSON: could not decode. Return a properly formatted JSON array (list).",
-        )
-
-    if not isinstance(parsed, list):
+        if isinstance(parsed, list):
+            return (True, raw)
         return (
             False,
             "Output must be a JSON array (list), not a single object.",
         )
+    except json.JSONDecodeError:
+        pass
 
-    return (True, raw)
+    # Strategy 2: regex extraction (handles verbose Crew Manager output).
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
+    if match:
+        extracted = match.group()
+        try:
+            parsed = json.loads(extracted)
+            if isinstance(parsed, list):
+                return (True, extracted)
+        except json.JSONDecodeError:
+            pass
+
+    return (
+        False,
+        "Output is not valid JSON. Return a properly formatted JSON array.",
+    )
 
 
 # Compliance Verdict Validation
@@ -48,19 +72,19 @@ def validate_compliance_verdict(result: TaskOutput):
     """Validate that the output is a valid ComplianceVerdict."""
     try:
         verdict = result.pydantic
-
-        if verdict.bid_decision not in ("GO", "NO-GO", "CONDITIONAL-GO"):
-            return (
-                False,
-                f"bid_decision must be GO, NO-GO, or CONDITIONAL-GO; got '{verdict.bid_decision}'.",
-            )
-
-        if not (0.0 <= verdict.compliance_score <= 1.0):
-            return (
-                False,
-                f"compliance_score must be between 0.0 and 1.0; got {verdict.compliance_score}.",
-            )
-
-        return (True, result)
     except Exception:
         return (False, "Could not parse output as ComplianceVerdict JSON.")
+
+    if verdict.bid_decision not in ("GO", "NO-GO", "CONDITIONAL-GO"):
+        return (
+            False,
+            f"bid_decision must be GO, NO-GO, or CONDITIONAL-GO; " f"got '{verdict.bid_decision}'.",
+        )
+
+    if not (0.0 <= verdict.compliance_score <= 1.0):
+        return (
+            False,
+            f"compliance_score must be between 0.0 and 1.0; " f"got {verdict.compliance_score}.",
+        )
+
+    return (True, result)
