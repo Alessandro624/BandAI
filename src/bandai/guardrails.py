@@ -16,7 +16,7 @@ def validate_json_array(
     result: TaskOutput,
     *,
     strip_fences: bool = False,
-) -> tuple[bool, str]:
+):
     """Validate that the task output is a parseable JSON array."""
     raw = result.raw.strip()
 
@@ -49,7 +49,7 @@ def validate_json_array(
 # Compliance Verdict Validation
 
 
-def validate_compliance_verdict(result: TaskOutput) -> tuple[bool, str]:
+def validate_compliance_verdict(result: TaskOutput):
     """Validate that the output is a valid ComplianceVerdict."""
     try:
         verdict = result.pydantic
