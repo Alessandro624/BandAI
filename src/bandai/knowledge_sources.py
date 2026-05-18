@@ -7,13 +7,14 @@ from typing import Any
 
 from crewai.knowledge.source.string_knowledge_source import StringKnowledgeSource  # type: ignore
 
+from bandai.utils import KNOWLEDGE_DIR
+
 log = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_COMPANY_PROFILE_PATH = _PROJECT_ROOT / "knowledge" / "company_profile.json"
+_COMPANY_PROFILE_PATH = KNOWLEDGE_DIR / "company_profile.json"
 
 
-# Public helpers
+# Public Helpers
 
 
 def get_company_knowledge_data() -> dict[str, Any]:
@@ -45,5 +46,5 @@ def get_all_knowledge_sources() -> list:
     except FileNotFoundError:
         log.warning("Company profile knowledge source not found - " "agents will rely on prompt-injected data only.")
     except Exception:
-        log.warning("Failed to create knowledge source ...")
+        log.error("Failed to create company knowledge source - " "agents will run without company context.")
     return sources
