@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+
+from bandai.utils import KNOWLEDGE_DIR, NO_GO_KEYWORDS, PROJECT_ROOT
 
 if TYPE_CHECKING:
     from crewai.llms.base_llm import BaseLLM  # type: ignore
@@ -13,7 +15,44 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 logging.getLogger("opentelemetry.attributes").setLevel(logging.ERROR)
 
-_CFG = Path(__file__).parent
+
+# Environment Override Model
+
+
+class EnvOverrides(BaseModel):
+    """Parsed LLM environment variable overrides."""
+
+    model: str | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(default=None, ge=1, le=131072)
+
+    @classmethod
+    def from_env(cls, prefix: str) -> EnvOverrides:
+        """Read overrides for *prefix* (MAIN_ or FAST_)."""
+
+        def _float(key: str) -> float | None:
+            raw = os.getenv(key)
+            if raw is None:
+                return None
+            try:
+                return float(raw)
+            except ValueError:
+                return None
+
+        def _int(key: str) -> int | None:
+            raw = os.getenv(key)
+            if raw is None:
+                return None
+            try:
+                return int(raw)
+            except ValueError:
+                return None
+
+        return cls(
+            model=os.getenv(f"{prefix}MODEL") or None,
+            temperature=_float(f"{prefix}TEMPERATURE"),
+            max_tokens=_int(f"{prefix}MAX_TOKENS"),
+        )
 
 
 # Provider Profile Models
@@ -126,8 +165,14 @@ def get_api_key() -> str:
     raise ValueError(f"No API key configured for provider '{provider.name}'.{available_msg}")
 
 
+@lru_cache(maxsize=4)
 def get_llm(fast: bool = False) -> BaseLLM:  # type: ignore[valid-type]
-    """Return a CrewAI LLM object for the active provider."""
+    """Return a cached CrewAI LLM object for the active provider.
+
+    The same (fast, provider, env-state) combination returns the
+    identical LLM instance, avoiding redundant object creation
+    across multiple crew builds in a single pipeline run.
+    """
     from crewai import LLM  # type: ignore
 
     provider = get_active_provider()
@@ -137,33 +182,11 @@ def get_llm(fast: bool = False) -> BaseLLM:  # type: ignore[valid-type]
 
     # Start from provider profile, then apply optional env overrides
     profile = provider.fast if fast else provider.main
+    overrides = EnvOverrides.from_env("FAST_" if fast else "MAIN_")
 
-    # ENV overrides for model specs
-    env_model = os.getenv("FAST_MODEL" if fast else "MAIN_MODEL")
-    if env_model:
-        # If env contains provider prefix (provider/model), use as-is; else use model name
-        profile_model = env_model
-    else:
-        profile_model = profile.model
-
-    # Numeric overrides
-    env_temp = os.getenv("FAST_TEMPERATURE" if fast else "MAIN_TEMPERATURE")
-    if env_temp is not None:
-        try:
-            profile_temperature = float(env_temp)
-        except ValueError:
-            profile_temperature = profile.temperature
-    else:
-        profile_temperature = profile.temperature
-
-    env_max = os.getenv("FAST_MAX_TOKENS" if fast else "MAIN_MAX_TOKENS")
-    if env_max is not None:
-        try:
-            profile_max = int(env_max)
-        except ValueError:
-            profile_max = profile.max_tokens
-    else:
-        profile_max = profile.max_tokens
+    profile_model = overrides.model or profile.model
+    profile_temperature = overrides.temperature if overrides.temperature is not None else profile.temperature
+    profile_max = overrides.max_tokens if overrides.max_tokens is not None else profile.max_tokens
 
     api_key = get_api_key() if provider.env_key else None
 
@@ -179,8 +202,9 @@ def get_llm(fast: bool = False) -> BaseLLM:  # type: ignore[valid-type]
     )
 
 
+@lru_cache(maxsize=1)
 def get_embedder() -> dict | None:
-    """Return an embedder configuration dict for Crew(embedder=...)."""
+    """Return a cached embedder configuration dict for Crew(embedder=...)."""
     provider = os.getenv("EMBEDDER_PROVIDER")
     if not provider:
         return None
@@ -207,9 +231,14 @@ def get_embedder() -> dict | None:
     return embedder
 
 
-def get_memory() -> "Memory | bool":  # type: ignore[valid-type]
-    """Return a CrewAI Memory object wired to the active provider."""
+def get_memory() -> "Memory | bool":  # type: ignore[valid-type]:
+    """
+    Return a CrewAI Memory object wired to the active provider.
 
+    Memory objects are intentionally not cached: each crew should
+    receive its own independent Memory instance so that context
+    isolation is preserved across pipeline phases.
+    """
     if os.getenv("DISABLE_MEMORY", "false").lower() in ("1", "true", "yes"):
         return False  # type: ignore[return-value]
 
@@ -245,13 +274,13 @@ def validate_config() -> list[str]:
         if (not key or key == f"your_{provider.env_key.lower()}_here") and (not generic_key or generic_key == "your_api_key_here"):
             errors.append(f"[{provider.env_key}] No API key set. " f"Set {provider.env_key} or API_KEY in your .env file.")
 
-    # Check knowledge file (project_root/knowledge/company_profile.json)
-    knowledge_path = Path(__file__).parent.parent.parent.parent / "knowledge" / "company_profile.json"
+    knowledge_path = KNOWLEDGE_DIR / "company_profile.json"
     if not knowledge_path.exists():
         errors.append(f"[knowledge] Company profile not found at {knowledge_path}. " "Create it based on the template.")
 
-    # Check portals config
-    portals_path = Path(__file__).parent / "portals.yaml"
+    from bandai.utils import CONFIG_DIR
+
+    portals_path = CONFIG_DIR / "portals.yaml"
     if not portals_path.exists():
         errors.append(f"[portals] Portal config not found at {portals_path}. " "The project requires at least one portal definition.")
 
@@ -259,35 +288,13 @@ def validate_config() -> list[str]:
 
 
 # Review Loop Limits
+
 _MAX_REVIEW_ITERATIONS = int(os.getenv("MAX_REVIEW_ITERATIONS", "5"))
 
-# Implicit NO-GO Keywords
-IMPLICIT_NO_GO_KEYWORDS: list[str] = [
-    # Italian
-    "non ho",
-    "non abbiamo",
-    "non saremo",
-    "non possiamo",
-    "non siamo",
-    "manca",
-    "mancano",
-    "impossibile",
-    "rinunciamo",
-    "abbandoniamo",
-    "lasciamo perdere",
-    "basta",
-    "stop",
-    "terminiamo",
-    "fermiamo",
-    "non partecipo",
-    "non partecipiamo",
-    "ritiro",
-    "ritiriamo",
-    # English
-    "we don't have",
-    "we can't",
-    "impossible",
-    "give up",
-    "stop",
-    "quit",
-]
+# Cache Management (testing)
+
+
+def clear_caches() -> None:
+    """Clear all LLM/embedder caches. Useful in tests."""
+    get_llm.cache_clear()
+    get_embedder.cache_clear()
