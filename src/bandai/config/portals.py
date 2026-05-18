@@ -7,9 +7,9 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
-log = logging.getLogger(__name__)
+from bandai.utils import CONFIG_DIR
 
-_CFG = Path(__file__).parent
+log = logging.getLogger(__name__)
 
 
 # Portal Config Model
@@ -24,13 +24,13 @@ class PortalConfig(BaseModel):
     country_filter: str | None = None
 
 
-# Load from YAML
+# Loading
 
 
 def _load_portals(path: Path | None = None) -> list[PortalConfig]:
     """Load portal definitions from the YAML config file."""
     if path is None:
-        path = _CFG / "portals.yaml"
+        path = CONFIG_DIR / "portals.yaml"
 
     if not path.exists():
         log.warning("Portal config not found at %s. Using empty portal list.", path)
@@ -45,12 +45,32 @@ def _load_portals(path: Path | None = None) -> list[PortalConfig]:
 BANDI_PORTALS: list[PortalConfig] = _load_portals()
 
 
-# Weight helpers
+def validate_portals() -> None:
+    """Raise ValueError if no portal is configured."""
+    if not BANDI_PORTALS:
+        raise ValueError("No procurement portals configured. " f"Ensure {CONFIG_DIR / 'portals.yaml'} contains at least one portal entry.")
+
+
+def reload_portals() -> list[PortalConfig]:
+    """Re-read portals from disk and update the module-level list."""
+    global BANDI_PORTALS  # noqa: PLW0603
+    BANDI_PORTALS = _load_portals()
+    _rebuild_weights()
+    return BANDI_PORTALS
+
+
+# Weight Helpers
 
 
 def _read_default_portal_weight() -> float:
     w = float(os.getenv("DEFAULT_PORTAL_WEIGHT", "0.5"))
-    return max(0.0, min(1.0, w))  # clamp to [0.0, 1.0]
+    return max(0.0, min(1.0, w))
+
+
+def _rebuild_weights() -> None:
+    """Rebuild the PORTAL_WEIGHTS dict from the current BANDI_PORTALS."""
+    global PORTAL_WEIGHTS  # noqa: PLW0603
+    PORTAL_WEIGHTS = {p.name: p.reliability for p in BANDI_PORTALS}
 
 
 PORTAL_WEIGHTS: dict[str, float] = {p.name: p.reliability for p in BANDI_PORTALS}
