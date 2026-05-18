@@ -63,10 +63,17 @@ def contract_to_summary(c: dict) -> str:
 
 def extract_json_array(raw: str) -> list:
     """Extract a JSON array from a raw LLM output string."""
-    match = re.search(r"\[.*\]", raw, re.DOTALL)
-    if not match:
+    start = raw.find("[")
+    if start == -1:
         raise ValueError("No JSON array found in the input.")
-    return json.loads(match.group())
+
+    end = raw.find("]", start)
+    if end != -1:
+        candidate = raw[start : end + 1]
+        return json.loads(candidate)
+
+    candidate = raw[start:]
+    return json.loads(candidate)
 
 
 # Implicit NO-GO Detection
