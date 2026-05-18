@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import logging
-import re
 from datetime import datetime
-from pathlib import Path
+from typing import Callable
 
 from pydantic import BaseModel, Field
 from crewai.flow.flow import Flow, listen, router, start  # type: ignore
@@ -14,12 +12,45 @@ from bandai.crews.compliance_crew import ComplianceCrew
 from bandai.crews.proposal_crew import ProposalCrew
 from bandai.crews.scout_crew import ScoutCrew
 from bandai.models import ComplianceVerdict, FinalProposal
-from bandai.config import IMPLICIT_NO_GO_KEYWORDS, _MAX_REVIEW_ITERATIONS
+from bandai.config import _MAX_REVIEW_ITERATIONS
+from bandai.utils import contract_to_summary, is_implicit_no_go
+from bandai.io import save_json
 
 log = logging.getLogger("bandai.flow")
 
-OUTPUT_DIR = Path("output")
-OUTPUT_DIR.mkdir(exist_ok=True)
+# Human Input Callback
+
+HumanInputFn = Callable[
+    [dict, ComplianceVerdict, int, int],
+    str,
+]
+
+
+def _default_human_input(
+    contract: dict,
+    verdict: ComplianceVerdict,
+    iteration: int,
+    max_iter: int,
+) -> str:
+    """CLI-based human input (blocking)."""
+    print(f"\n{'=' * 60}")
+    print(f"  CONDITIONAL-GO  [{iteration}/{max_iter}]")
+    print(f"  {contract.get('title', '')[:50]}")
+    print(f"  Compliance score: {verdict.compliance_score:.2f}")
+    print(f"\n  Conditions still open:")
+    for c in verdict.conditions:
+        print(f"    - {c}")
+    print(f"\n  Key risks:")
+    for r in verdict.key_risks:
+        print(f"    - {r}")
+    print(f"{'=' * 60}")
+    print(
+        f"\nProvide additional information to unlock this opportunity\n"
+        f"(e.g., ongoing certifications, partners, already acquired documents).\n"
+        f"Press Enter to leave unchanged.\n"
+        f"To decline, write: 'enough', 'we don't have X', etc."
+    )
+    return input(f"[{iteration}/{max_iter}] Input: ").strip()
 
 
 # Flow State
@@ -53,66 +84,6 @@ class BandAIState(BaseModel):
     total_proposals: int = 0
 
 
-# Helper functions
-
-
-def _save_json(data: dict, filename: str) -> Path:
-    path = OUTPUT_DIR / filename
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    log.info("Saved: %s", path)
-    return path
-
-
-def _contract_to_summary(c: dict) -> str:
-    return (
-        f"Titolo               : {c.get('title', 'N/A')}\n"
-        f"Canonical Contract ID: {c.get('canonical_contract_id', 'N/A')}\n"
-        f"Stazione appaltante  : {c.get('contracting_authority', 'N/A')}\n"
-        f"Importo a base d'asta: EUR {c.get('value_eur', 0):,.0f}\n"
-        f"Scadenza             : {c.get('deadline', 'N/A')}\n"
-        f"CPV                  : {', '.join(c.get('cpv_codes', []))}\n"
-        f"URL                  : {c.get('canonical_url', 'N/A')}"
-    )
-
-
-def _extract_json_array(raw: str) -> list:
-    """Extract a JSON array from the raw LLM output string."""
-    match = re.search(r"\[.*\]", raw, re.DOTALL)
-    if not match:
-        raise ValueError("No JSON array found in the input.")
-    return json.loads(match.group())
-
-
-def _is_implicit_no_go(text: str) -> bool:
-    """Fast keyword check for abandonment language (pre-LLM, zero cost)."""
-    lower = text.lower()
-    return any(kw in lower for kw in IMPLICIT_NO_GO_KEYWORDS)
-
-
-def _ask_human_on_conditional_go(
-    contract: dict,
-    verdict: ComplianceVerdict,
-    iteration: int,
-    max_iter: int,
-) -> str:
-    print(f"\n{'=' * 60}")
-    print(f"  CONDITIONAL-GO  [{iteration}/{max_iter}]")
-    print(f"  {contract.get('title', '')[:50]}")
-    print(f"  Compliance score: {verdict.compliance_score:.2f}")
-    print(f"\n  Conditions still open:")
-    for c in verdict.conditions:
-        print(f"    - {c}")
-    print(f"\n  Key risks:")
-    for r in verdict.key_risks:
-        print(f"    - {r}")
-    print(f"{'=' * 60}")
-    print(f"\nProvide additional information to unlock this opportunity")
-    print(f"(e.g., ongoing certifications, partners, already acquired documents).")
-    print(f"Press Enter to leave unchanged.")
-    print(f"To decline, write: 'enough', 'we don't have X', etc.")
-    return input(f"[{iteration}/{max_iter}] Input: ").strip()
-
-
 # BandAI Flow
 
 
@@ -122,13 +93,16 @@ class BandAIFlow(Flow[BandAIState]):
     CrewAI Flow that orchestrates the full BandAI procurement pipeline.
     """
 
+    def __init__(self, human_input_fn: HumanInputFn | None = None) -> None:
+        super().__init__()
+        self._human_input_fn = human_input_fn or _default_human_input
+
     @start()
     def begin(self) -> None:
         """Entry point: gather user preferences."""
         if self.state.mode == "full":
             log.info("=== PHASE 1: SCOUTING ===")
-            print("\nDescribe your preferences for this scouting session.")
-            print("Examples: sector, region, minimum/maximum amount, keywords...")
+            print("\nDescribe your preferences for this scouting session.\n" "Examples: sector, region, minimum/maximum amount, keywords...")
             prefs = input("Preferences (press Enter to skip): ").strip()
             self.state.user_preferences = prefs or "No specific preferences - use standard CPV filters."
         elif self.state.mode == "scout":
@@ -136,10 +110,8 @@ class BandAIFlow(Flow[BandAIState]):
 
     @router(begin)
     def route_from_begin(self) -> str:
-        """Decide: scout, or skip straight to compliance?"""
-        if self.state.mode in ("full", "scout"):
-            return "scout"
-        return "skip_scout"
+        """Decide next step after scouting."""
+        return "scout" if self.state.mode in ("full", "scout") else "skip_scout"
 
     # Phase 1: Scouting
 
@@ -147,20 +119,22 @@ class BandAIFlow(Flow[BandAIState]):
     def run_scouting(self) -> None:
         """Run the Scout crew to discover tenders."""
         try:
-            built_crew, final_task = ScoutCrew().build(user_preferences=self.state.user_preferences)
+            built_crew, final_task = ScoutCrew().build(
+                user_preferences=self.state.user_preferences,
+            )
             built_crew.kickoff()
-            raw = final_task.output.raw
 
+            # Use CrewAI structured output instead of manual JSON parsing.
+            raw = final_task.output.raw
             try:
-                parsed = _extract_json_array(raw)
-                contracts = [json.loads(item) if isinstance(item, str) else item for item in parsed]
-            except (json.JSONDecodeError, AttributeError, ValueError):
-                log.error("Failed to parse Scout output as JSON. Raw output:\n%s", raw)
+                contracts = [c if isinstance(c, dict) else c.model_dump() for c in (final_task.output.pydantic or [])]
+            except Exception:
+                log.error("Scout output was not parseable. Raw:\n%s", raw)
                 contracts = []
 
             self.state.contracts = contracts
             self.state.total_contracts = len(contracts)
-            _save_json({"contracts": contracts}, "01_scout_results.json")
+            save_json({"contracts": contracts}, "01_scout_results.json")
             log.info("Scout found %d unique contracts.", len(contracts))
         except Exception:
             log.exception("Scouting failed")
@@ -169,9 +143,7 @@ class BandAIFlow(Flow[BandAIState]):
     @router(run_scouting)
     def route_after_scout(self) -> str:
         """Decide next step after scouting."""
-        if self.state.mode == "scout":
-            return "end_scout"
-        return "start_compliance"
+        return "end_scout" if self.state.mode == "scout" else "start_compliance"
 
     @listen("end_scout")
     def end_scout_only(self) -> None:
@@ -184,6 +156,8 @@ class BandAIFlow(Flow[BandAIState]):
     @listen("skip_scout")
     def skip_to_compliance(self) -> None:
         """Skip scouting when mode != full/scout."""
+        log.info("Skipping scouting phase.")
+        pass
 
     @router(skip_to_compliance)
     def route_skip(self) -> str:
@@ -213,8 +187,11 @@ class BandAIFlow(Flow[BandAIState]):
         if idx >= len(contracts):
             # All contracts processed - save NO-GO log
             if self.state.no_go_log:
-                _save_json(
-                    {"no_go_contracts": self.state.no_go_log, "total": len(self.state.no_go_log)},
+                save_json(
+                    {
+                        "no_go_contracts": self.state.no_go_log,
+                        "total": len(self.state.no_go_log),
+                    },
                     "02_no_go_review_required.json",
                 )
                 log.warning(
@@ -230,14 +207,9 @@ class BandAIFlow(Flow[BandAIState]):
 
         contract = contracts[idx]
         self.state.current_contract = contract
-        self.state.current_summary = _contract_to_summary(contract)
+        self.state.current_summary = contract_to_summary(contract)
 
-        log.info(
-            "  [%d/%d] %s",
-            idx + 1,
-            len(contracts),
-            contract.get("title", "?"),
-        )
+        log.info("  [%d/%d] %s", idx + 1, len(contracts), contract.get("title", "?"))
 
     @router(process_next_contract_func)
     def route_process_contract(self) -> str:
@@ -250,7 +222,9 @@ class BandAIFlow(Flow[BandAIState]):
     def run_compliance_crew_func(self) -> None:
         """Run the Compliance crew for the current contract."""
         try:
-            built_crew, verdict_task = ComplianceCrew().build(self.state.current_summary)
+            built_crew, verdict_task = ComplianceCrew().build(
+                self.state.current_summary,
+            )
             built_crew.kickoff()
 
             verdict: ComplianceVerdict = verdict_task.output.pydantic
@@ -289,20 +263,16 @@ class BandAIFlow(Flow[BandAIState]):
             self.state.current_contract_index += 1
             return "process_next_contract"
 
-    # Conditional-GO human review loop
+    # Conditional-GO review loop
 
     @listen("handle_conditional_go")
     def handle_conditional_go_func(self) -> None:
-        """Handle CONDITIONAL-GO with human review loop.
-
-        All logic lives here - the router just checks the verdict state
-        to decide whether to loop or continue.
-        """
+        """Handle CONDITIONAL-GO with human review loop."""
         verdict = ComplianceVerdict(**self.state.current_verdict)
         contract = self.state.current_contract
         iteration = self.state.review_iteration
 
-        human_note = _ask_human_on_conditional_go(contract, verdict, iteration, _MAX_REVIEW_ITERATIONS)
+        human_note = self._human_input_fn(contract, verdict, iteration, _MAX_REVIEW_ITERATIONS)
 
         # Exit 1: user skipped
         if not human_note:
@@ -312,7 +282,7 @@ class BandAIFlow(Flow[BandAIState]):
             return
 
         # Exit 2: fast implicit NO-GO detection (pre-LLM)
-        if _is_implicit_no_go(human_note):
+        if is_implicit_no_go(human_note):
             log.warning("  Implicit NO-GO detected: '%s'", human_note)
             self.state.current_verdict = ComplianceVerdict(
                 bid_decision="NO-GO",
@@ -423,7 +393,7 @@ class BandAIFlow(Flow[BandAIState]):
                 contract_id,
             )
 
-            summary = _contract_to_summary(contract)
+            summary = contract_to_summary(contract)
             verdict = ComplianceVerdict(**verdict_dict)
             if verdict.bid_decision == "CONDITIONAL-GO" and verdict.conditions:
                 summary += "\n\nCONDIZIONI DA SODDISFARE (CONDITIONAL-GO):\n" + "\n".join(f"  - {c}" for c in verdict.conditions)
@@ -433,7 +403,7 @@ class BandAIFlow(Flow[BandAIState]):
                 built_crew.kickoff()
                 proposal: FinalProposal = proposal_task.output.pydantic
                 self.state.proposals.append(proposal.model_dump())
-                _save_json(
+                save_json(
                     proposal.model_dump(),
                     f"03_proposal_{i:02d}_{contract_id}.json",
                 )
@@ -448,13 +418,13 @@ class BandAIFlow(Flow[BandAIState]):
         self.state.total_proposals = len(self.state.proposals)
         self._print_summary()
 
-    # Internal helpers
+    # Internal Helpers
 
     def _save_compliance_result(self) -> None:
         idx = self.state.current_contract_index + 1
         contract = self.state.current_contract
         contract_id = contract.get("canonical_contract_id", f"unknown_{idx}")
-        _save_json(
+        save_json(
             {"contract": contract, "verdict": self.state.current_verdict},
             f"02_compliance_{idx:02d}_{contract_id}.json",
         )
