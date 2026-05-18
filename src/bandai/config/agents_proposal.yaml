@@ -30,7 +30,7 @@ auctioneer:
 
 proposal_architect:
   role: >
-    Proposal Architect (Technical Writer)
+    Proposal Architect
   goal: >
     Write a polished, winning offerta tecnica in Italian using ONLY the content
     approved by the Auctioneer. Follow the standard Italian PA proposal

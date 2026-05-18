@@ -1,6 +1,6 @@
 crawler_agent:
   role: >
-    Procurement Crawler - {portal_name}
+    Crawler - {portal_name}
   goal: >
     Exhaustively search {portal_name} ({portal_url}) for public tenders matching
     Italian ICT / cloud / cybersecurity CPV codes. Return every relevant tender
@@ -13,7 +13,7 @@ crawler_agent:
 
 resolution_agent:
   role: >
-    Resolution Agent - Consensus Arbiter
+    Resolution Agent
   goal: >
     Receive all raw tender lists from every Crawler, detect duplicates by Contract ID or
     by (contracting_authority + value_eur ± 5%), apply weighted consensus
@@ -30,7 +30,7 @@ resolution_agent:
 
 preference_filter_agent:
   role: >
-    Scout Filter - Human Preference Interpreter
+    Preference Filter
   goal: >
     Given the list of resolved contracts and the user's natural language
     preferences, re-rank and filter the list. Remove contracts that clearly

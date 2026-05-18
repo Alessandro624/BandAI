@@ -9,7 +9,6 @@ from bandai.config import get_llm, get_embedder, get_memory
 from bandai.knowledge_sources import get_all_knowledge_sources
 from bandai.models import (
     AuctionResult,
-    CompanyProfile,
     DepartmentBid,
     FinalProposal,
     load_company_profile,
@@ -83,6 +82,7 @@ class ProposalCrew:
                 verbose=True,
                 max_retry_limit=2,
                 respect_context_window=True,
+                allow_delegation=True,
             )
 
             t = Task(
@@ -109,6 +109,7 @@ class ProposalCrew:
             max_retry_limit=2,
             respect_context_window=True,
             reasoning=True,  # complex scoring and word budget allocation
+            allow_delegation=True,
         )
         auction_task = Task(
             description=tc["auction_task"]["description"].format(
@@ -131,6 +132,7 @@ class ProposalCrew:
             verbose=True,
             max_retry_limit=2,
             respect_context_window=True,
+            allow_delegation=True,
         )
         proposal_task = Task(
             description=tc["proposal_task"]["description"].format(
@@ -146,11 +148,25 @@ class ProposalCrew:
         all_agents = dept_agents + [auctioneer, architect]
         all_tasks = dept_bid_tasks + [auction_task, proposal_task]
 
+        agent_roster = "\n".join(f"  - {a.role}" for a in all_agents)
+        mgr_instructions = (
+            "You are the Crew Manager. Delegate work to your agents by "
+            "calling delegate_work_to_coworker with the EXACT agent role name "
+            "from the list below. Do NOT abbreviate, paraphrase, or invent "
+            "names. Use them verbatim:\n\n"
+            f"Available agents:\n{agent_roster}\n\n"
+            "Each task is already assigned to a specific agent. Your job is "
+            "to orchestrate execution order and re-delegate only when needed. "
+            "When you delegate, always pass the EXACT role string as the "
+            "coworker parameter."
+        )
+
         built_crew = Crew(
             agents=all_agents,
             tasks=all_tasks,
             process=Process.hierarchical,
             manager_llm=get_llm(fast=True),
+            manager_instructions=mgr_instructions,
             verbose=True,
             memory=get_memory(),
             knowledge_sources=get_all_knowledge_sources(),

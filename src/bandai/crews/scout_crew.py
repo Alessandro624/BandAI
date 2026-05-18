@@ -71,6 +71,7 @@ class ScoutCrew:
                 max_iter=5,
                 max_retry_limit=2,
                 respect_context_window=True,
+                allow_delegation=True,
             )
 
             t = Task(
@@ -102,6 +103,7 @@ class ScoutCrew:
             max_retry_limit=2,
             respect_context_window=True,
             inject_date=True,  # temporal awareness for deadline handling
+            allow_delegation=True,
         )
 
         resolution_task = Task(
@@ -128,6 +130,7 @@ class ScoutCrew:
             verbose=True,
             max_retry_limit=2,
             respect_context_window=True,
+            allow_delegation=True,
         )
 
         preference_filter_task = Task(
@@ -145,11 +148,25 @@ class ScoutCrew:
         all_agents = crawler_agents + [resolution_agent, preference_filter_agent]
         all_tasks = crawl_tasks + [resolution_task, preference_filter_task]
 
+        agent_roster = "\n".join(f"  - {a.role}" for a in all_agents)
+        mgr_instructions = (
+            "You are the Crew Manager. Delegate work to your agents by "
+            "calling delegate_work_to_coworker with the EXACT agent role name "
+            "from the list below. Do NOT abbreviate, paraphrase, or invent "
+            "names. Use them verbatim:\n\n"
+            f"Available agents:\n{agent_roster}\n\n"
+            "Each task is already assigned to a specific agent. Your job is "
+            "to orchestrate execution order and re-delegate only when needed. "
+            "When you delegate, always pass the EXACT role string as the "
+            "coworker parameter."
+        )
+
         built_crew = Crew(
             agents=all_agents,
             tasks=all_tasks,
             process=Process.hierarchical,
             manager_llm=get_llm(fast=True),
+            manager_instructions=mgr_instructions,
             verbose=True,
             memory=get_memory(),
             knowledge_sources=get_all_knowledge_sources(),
