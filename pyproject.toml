@@ -32,3 +32,8 @@ type = "flow"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "unit: fast deterministic unit tests",
+    "mock_llm: integration-style tests using mocked Crew/LLM outputs",
+    "llm: real LLM smoke tests, skipped from regular CI/test runs",
+]
