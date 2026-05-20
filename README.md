@@ -88,6 +88,34 @@ Next, navigate to your project directory and install the dependencies:
 crewai install
 ```
 
+---
+
+## ✅ Testing
+
+BandAI includes a lightweight non-LLM test suite for validating the multi-agent pipeline without calling real model providers or consuming API credits.
+
+Install development dependencies:
+
+```bash
+uv sync --extra dev
+```
+
+Run all tests that do **not** require live LLM calls:
+
+```bash
+uv run pytest -q -m "not llm"
+```
+
+Run only the mocked flow/integration tests:
+
+```bash
+uv run pytest -q -m mock_llm
+```
+
+These mocked tests cover the Scout → Compliance → Proposal orchestration with deterministic fake crew outputs, including `GO`, `NO-GO`, `CONDITIONAL-GO`, and scout-only paths. They are safe to run during development and before demos because they do not require API keys.
+
+For the full testing strategy, markers, fixtures, and optional LLM smoke tests, see [Testing BandAI](docs/testing.md).
+
 ## Running the Project
 
 To kickstart your crew of AI agents and begin task execution, run this from the root folder of your project:
