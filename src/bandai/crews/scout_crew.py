@@ -15,7 +15,7 @@ from bandai.config import (
 )
 from bandai.guardrails import validate_json_array
 from bandai.knowledge_sources import get_all_knowledge_sources
-from bandai.models import ResolvedContract, load_company_profile
+from bandai.models import RawContract, ResolvedContract, load_company_profile
 from bandai.tools.crawler_tools import ContractDetailTool, TenderCrawlerTool
 from bandai.utils import load_yaml_config
 
@@ -34,8 +34,8 @@ class ScoutCrew:
     Scout Crew - discovers and deduplicates Italian public tenders.
 
     Because the number of crawler agents is dynamic (one per portal),
-    we build agents and tasks programmatically.  The hierarchical
-    process enables true parallel crawling of all portals.
+    we build agents and tasks programmatically. Crawler tasks are marked
+    async to allow concurrent discovery when supported by the runtime.
     """
 
     agents: list[BaseAgent]
@@ -71,7 +71,7 @@ class ScoutCrew:
                 max_iter=5,
                 max_retry_limit=2,
                 respect_context_window=True,
-                allow_delegation=True,
+                allow_delegation=False,
             )
 
             t = Task(
@@ -83,6 +83,9 @@ class ScoutCrew:
                 expected_output=task_cfg["expected_output"],
                 agent=ag,
                 async_execution=True,
+                output_pydantic=list[RawContract],
+                guardrail=lambda r: validate_json_array(r, strip_fences=True),
+                guardrail_max_retries=3,
             )
 
             crawler_agents.append(ag)
@@ -103,7 +106,7 @@ class ScoutCrew:
             max_retry_limit=2,
             respect_context_window=True,
             inject_date=True,  # temporal awareness for deadline handling
-            allow_delegation=True,
+            allow_delegation=False,
         )
 
         resolution_task = Task(
@@ -130,7 +133,7 @@ class ScoutCrew:
             verbose=True,
             max_retry_limit=2,
             respect_context_window=True,
-            allow_delegation=True,
+            allow_delegation=False,
         )
 
         preference_filter_task = Task(
@@ -148,25 +151,10 @@ class ScoutCrew:
         all_agents = crawler_agents + [resolution_agent, preference_filter_agent]
         all_tasks = crawl_tasks + [resolution_task, preference_filter_task]
 
-        agent_roster = "\n".join(f"  - {a.role}" for a in all_agents)
-        mgr_instructions = (
-            "You are the Crew Manager. Delegate work to your agents by "
-            "calling delegate_work_to_coworker with the EXACT agent role name "
-            "from the list below. Do NOT abbreviate, paraphrase, or invent "
-            "names. Use them verbatim:\n\n"
-            f"Available agents:\n{agent_roster}\n\n"
-            "Each task is already assigned to a specific agent. Your job is "
-            "to orchestrate execution order and re-delegate only when needed. "
-            "When you delegate, always pass the EXACT role string as the "
-            "coworker parameter."
-        )
-
         built_crew = Crew(
             agents=all_agents,
             tasks=all_tasks,
-            process=Process.hierarchical,
-            manager_llm=get_llm(fast=True),
-            manager_instructions=mgr_instructions,
+            process=Process.sequential,
             verbose=True,
             memory=get_memory(),
             knowledge_sources=get_all_knowledge_sources(),
