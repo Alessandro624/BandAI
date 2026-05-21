@@ -36,8 +36,17 @@ def _install_import_stubs_when_crewai_is_unavailable() -> None:
 
     class Flow:
         @classmethod
-        def __class_getitem__(cls, _item: object) -> type["Flow"]:
-            return cls
+        def __class_getitem__(cls, state_cls: object) -> type["Flow"]:
+            """Return a subclass whose __init__ creates self.state from state_cls."""
+
+            class _TypedFlow(cls):  # type: ignore[misc]
+                def __init__(self_inner, *_args: object, **_kwargs: object) -> None:
+                    # Instantiate the state model so self.state is available.
+                    self_inner.state = state_cls() if isinstance(state_cls, type) else state_cls
+
+            _TypedFlow.__name__ = "Flow"
+            _TypedFlow.__qualname__ = "Flow"
+            return _TypedFlow
 
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
@@ -64,6 +73,8 @@ def _install_import_stubs_when_crewai_is_unavailable() -> None:
         def __init__(self, *args: object, **kwargs: object) -> None:
             self.args = args
             self.kwargs = kwargs
+            # Expose content kwarg as attribute for tests that check it.
+            self.content = kwargs.get("content", "")
 
     string_knowledge_module.StringKnowledgeSource = StringKnowledgeSource
     sys.modules["crewai.knowledge"] = knowledge_package
