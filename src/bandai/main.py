@@ -134,6 +134,11 @@ def test() -> None:
     _run_command(["crewai", "test", *sys.argv[1:]])
 
 
+def run_pytest() -> None:
+    """Run unit tests (pytest) via the project script uv run pytest_unit."""
+    _run_command(["pytest", "tests/", "-v", *sys.argv[1:]])
+
+
 def run_with_trigger() -> None:
     """Run the BandAI pipeline from an external trigger (webhook/API)."""
     run()
