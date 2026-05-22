@@ -1,485 +1,158 @@
-# Crew Architecture
+# Crews
 
-## Overview
+BandAI has three crews, they all use `memory=get_memory()` for cross-session learning and unified embedder configuration.
 
-BandAI uses specialized CrewAI crews to split the procurement workflow into focused responsibilities.
+## ScoutCrew
 
-The current pipeline uses three main crews:
+**File:** `crews/scout_crew.py`
+**Config:** `config/agents_scout.yaml`, `config/tasks_scout.yaml`
 
-- `ScoutCrew`
-- `ComplianceCrew`
-- `ProposalCrew`
+Discovers and deduplicates Italian public tenders across multiple procurement portals. The number of crawler agents is dynamic - one per portal defined in `config/portals.yaml`.
 
-These crews are orchestrated by `src/bandai/main.py`.
+### Agents
 
-Each crew loads its agent and task definitions from YAML files under:
+| Agent | LLM | Tools | Notes |
+| ------------------------ | ------- | -------------------------------- | ------------------------------ |
+| Crawler Agent (×N) | fast | TenderCrawlerTool, ContractDetailTool | One per portal, async |
+| Resolution Agent | main | ContractDetailTool | `inject_date=True` |
+| Preference Filter | main | - | `human_input=True` |
 
-```text
-src/bandai/config/
-```
-
-This keeps prompt/task configuration separate from Python orchestration logic.
-
-## Crew Summary
-
-| Crew | File | Main responsibility |
-|---|---|---|
-| `ScoutCrew` | `src/bandai/crews/scout_crew.py` | Discover, enrich, deduplicate, and filter tender opportunities |
-| `ComplianceCrew` | `src/bandai/crews/compliance_crew.py` | Evaluate eligibility, risks, and bid/no-bid decisions |
-| `ProposalCrew` | `src/bandai/crews/proposal_crew.py` | Generate proposal content for approved opportunities |
-
-## Shared Patterns
-
-All crews follow a similar structure:
-
-1. Load YAML configuration files.
-2. Build CrewAI `Agent` objects.
-3. Build CrewAI `Task` objects.
-4. Connect task context dependencies.
-5. Return a `Crew` instance and the final task whose output is consumed by the pipeline.
-
-The current implementation uses `Process.sequential` for crew execution, while some tasks are configured with `async_execution=True` to allow parallel work inside the sequential crew process.
-
-## `ScoutCrew`
-
-File:
+### Task Chain
 
 ```text
-src/bandai/crews/scout_crew.py
+crawl_task (×N, async) -> resolution_task -> preference_filter_task
 ```
 
-### Purpose
+1. **crawl_task** - Each crawler searches one portal for tenders matching Italian ICT/cloud CPV codes. Returns `RawContract` JSON arrays.
+2. **resolution_task** - Deduplicates across portals using Contract ID matching and +/-5% value tolerance. Applies weighted consensus polling using portal reliability scores. Returns `ResolvedContract` JSON array ranked by `value_eur` descending. Guardrail: output must be a raw JSON array starting with `[`.
+3. **preference_filter_task** - Filters and re-ranks based on user preferences. Adds `fit_reason` to each entry. Guardrail: strips markdown fences, validates JSON array format.
 
-`ScoutCrew` discovers and resolves Italian public tender opportunities.
+### Build Signature
 
-It builds crawler agents dynamically, one per configured procurement portal. This is useful because the list of portals is configuration-driven rather than hardcoded into a fixed set of CrewAI-decorated methods.
+```python
+crew, final_task = ScoutCrew().build(user_preferences="...")
+crew.kickoff()
+data = final_task.output.raw  # JSON string
+```
 
-### Configuration files
+`build()` returns a `(Crew, Task)` tuple. The task is `preference_filter_task`, not the intermediate resolution task.
 
-`ScoutCrew` loads:
+---
+
+## ComplianceCrew
+
+**File:** `crews/compliance_crew.py`
+**Config:** `config/agents_compliance.yaml`, `config/tasks_compliance.yaml`
+
+Runs a structured advocate/auditor debate to produce a bid verdict for a single contract. Two modes: initial assessment (`build()`) and human review re-evaluation (`build_review()`).
+
+### Agents (Initial Assessment)
+
+| Agent              | LLM   | Tools                 | Notes                          |
+|--------------------|-------|-----------------------|--------------------------------|
+| Advocate           | main  | ComplianceCheckerTool | Optimistic bid manager         |
+| Auditor            | main  | ComplianceCheckerTool | Former ANAC inspector          |
+| Compliance Officer | main  | -                     | `reasoning=True` for synthesis |
+
+### Task Chain (Initial)
 
 ```text
-agents_scout.yaml
-tasks_scout.yaml
+advocate_task -> auditor_task -> verdict_task
 ```
 
-### Main inputs
+1. **advocate_task** - Maps every tender requirement to MEETS / POTENTIALLY MEETS / DOES NOT MEET. Proposes mitigations for borderline items. Returns `AdvocateAnalysis`.
+2. **auditor_task** - Challenges the advocate's claims point-by-point. Identifies hard blockers vs. soft risks. Returns `AuditorChallenge`.
+3. **verdict_task** - Synthesizes both analyses into a binding `ComplianceVerdict`: GO, NO-GO, or CONDITIONAL-GO. Lists D.Lgs. 36/2023 articles in `legal_flags`. Guardrail: validates `bid_decision` enum and `compliance_score` range.
 
-- user scouting preferences
-- configured procurement portals
-- company ATECO codes
-- portal reliability weights
+### Agents (Human Review)
 
-The configured portals come from `BANDI_PORTALS`, and portal ranking uses `PORTAL_WEIGHTS` plus `_DEFAULT_PORTAL_WEIGHT`.
+| Agent              | LLM   | Notes                     |
+|--------------------|-------|---------------------------|
+| Re-evaluator       | main  | `inject_date=True`        |
 
-### Agents and tasks
-
-#### 1. Crawler agents
-
-For each portal in `BANDI_PORTALS`, the crew creates one crawler agent.
-
-Each crawler agent uses:
-
-- `TenderCrawlerTool`
-- `ContractDetailTool`
-- fast LLM configuration via `get_llm(fast=True)`
-
-Each crawler task runs with:
-
-```python
-async_execution=True
-```
-
-This allows portal crawling tasks to run in parallel.
-
-#### 2. Resolution agent
-
-The resolution agent receives all crawler task outputs as context.
-
-Its role is to resolve duplicate or overlapping tender notices and produce normalized contract information.
-
-It uses:
-
-- `ContractDetailTool`
-- main LLM configuration via `get_llm(fast=False)`
-- `output_pydantic=list[ResolvedContract]`
-
-#### 3. Preference filter agent
-
-The preference filter agent applies user preferences to the resolved opportunities.
-
-It receives `resolution_task` as context and is configured with:
-
-```python
-human_input=True
-```
-
-This means the task can pause for user review/confirmation.
-
-### Output
-
-The final relevant output for the main pipeline is the resolution task output, expected as:
-
-```python
-list[ResolvedContract]
-```
-
-In `main.py`, this output is parsed and converted into contract dictionaries for the compliance phase.
-
-### Interaction flow
+### Task Chain (Review)
 
 ```text
-Configured procurement portals
-    ↓
-Crawler agents, one per portal
-    ↓
-Crawler tasks, async
-    ↓
-Resolution agent
-    ↓
-ResolvedContract list
-    ↓
-Preference filter agent
-    ↓
-Filtered tender opportunities
+human_review_task (standalone)
 ```
 
-## `ComplianceCrew`
+Receives the original CONDITIONAL-GO verdict plus the human's natural language note. Performs a three-step analysis: intent check (detect abandonment), condition mapping, and verdict update. Returns an updated `ComplianceVerdict`.
 
-File:
+### Build Signatures
+
+```python
+# Initial assessment
+crew, verdict_task = ComplianceCrew().build(contract_summary="...")
+crew.kickoff()
+verdict: ComplianceVerdict = verdict_task.output.pydantic
+
+# Human review
+review_crew, review_task = ComplianceCrew().build_review(
+    contract_summary="...",
+    original_verdict=verdict,
+    human_note="we got the ISO cert last week",
+    iteration=1,
+)
+review_crew.kickoff()
+updated: ComplianceVerdict = review_task.output.pydantic
+```
+
+---
+
+## ProposalCrew
+
+**File:** `crews/proposal_crew.py`
+**Config:** `config/agents_proposal.yaml`, `config/tasks_proposal.yaml`
+
+Generates a complete Italian *offerta tecnica* via an internal departmental auction. The number of department agents is dynamic - one per department in the company profile, capped at `MAX_DEPARTMENTS = 15`.
+
+### Agents
+
+| Agent              | LLM   | Tools                | Notes                          |
+|--------------------|-------|----------------------|--------------------------------|
+| Department Rep (×N)| fast  | -                    | One per department, async      |
+| Auctioneer         | main  | -                    | `reasoning=True` for scoring   |
+| Proposal Architect | main  | ProposalWriterTool   | Writes final Markdown document |
+
+### Task Chain
 
 ```text
-src/bandai/crews/compliance_crew.py
+dept_bid_task (×N, async) -> auction_task -> proposal_task
 ```
 
-### Purpose
-
-`ComplianceCrew` evaluates whether a discovered contract should be pursued.
-
-It implements a structured debate pattern:
-
-1. an advocate highlights reasons to bid,
-2. an auditor challenges assumptions and risks,
-3. a compliance officer synthesizes the final verdict.
-
-### Configuration files
-
-`ComplianceCrew` loads:
+1. **dept_bid_task** - Each department submits a `DepartmentBid` with relevance score, evidence quality score, word budget request, and suggested section. Honest scoring is enforced because the auctioneer penalises inflated values.
+2. **auction_task** - Applies a fixed composite scoring formula:
 
 ```text
-agents_compliance.yaml
-tasks_compliance.yaml
+composite = (relevance_score × 0.50) + (evidence_quality_score × 0.35) + (section_coverage_bonus × 0.15)
 ```
 
-### Main inputs
+Selects bids greedily by rank, deconflicts duplicate sections, and scales word budgets proportionally if total exceeds the limit. Returns `AuctionResult`.
+3. **proposal_task** - Writes the full proposal in Italian using only the auctioneer-approved content. Sections follow standard PA structure. Includes compliance declarations. Returns `FinalProposal`. The `ProposalWriterTool` writes a Markdown file to `output/`.
 
-- contract summary
-- company name
-- company certifications
-- turnover history
-- past public contracts
-
-Company data comes from `COMPANY`.
-
-### Agents and tasks
-
-#### 1. Advocate
-
-The advocate looks for positive evidence and arguments in favor of bidding.
-
-It uses:
-
-- `ComplianceCheckerTool`
-- main LLM configuration via `get_llm()`
-- output model: `AdvocateAnalysis`
-
-#### 2. Auditor
-
-The auditor reviews the opportunity critically.
-
-It receives the advocate task as context:
+### Build Signature
 
 ```python
-context=[advocate_task]
+crew, proposal_task = ProposalCrew().build(
+    contract_summary="...",
+    total_word_limit=3000,
+    manager_instructions="Use exact agent role names when delegating work. Do not invent or abbreviate role names.",
+)
+crew.kickoff()
+proposal: FinalProposal = proposal_task.output.pydantic
 ```
 
-It uses:
-
-- `ComplianceCheckerTool`
-- main LLM configuration via `get_llm()`
-- output model: `AuditorChallenge`
-
-#### 3. Compliance officer
-
-The compliance officer reads both the advocate and auditor outputs.
-
-It receives both previous tasks as context:
-
-```python
-context=[advocate_task, auditor_task]
-```
-
-It produces the final compliance decision using:
-
-```python
-output_pydantic=ComplianceVerdict
-```
-
-### Output
-
-The primary output is:
-
-```python
-ComplianceVerdict
-```
-
-The verdict includes:
-
-- bid decision: `GO`, `NO-GO`, or `CONDITIONAL-GO`
-- conditions
-- key risks
-- key strengths
-- compliance score
-- legal flags
-- rationale
-
-### Human review
-
-`ComplianceCrew` also provides `build_review()` for cases where the main pipeline needs to re-evaluate a `CONDITIONAL-GO` contract after human input.
-
-The review crew contains a single reviewer agent configured from:
-
-```text
-human_input_review_agent
-human_review_task
-```
-
-It receives:
-
-- original verdict JSON
-- human note
-- current iteration
-- maximum review iteration count
-
-It outputs a new `ComplianceVerdict`.
-
-### Interaction flow
-
-```text
-Contract summary
-    ↓
-Advocate agent
-    ↓
-AdvocateAnalysis
-    ↓
-Auditor agent
-    ↓
-AuditorChallenge
-    ↓
-Compliance officer
-    ↓
-ComplianceVerdict
-```
-
-For human review:
-
-```text
-Original ComplianceVerdict
-    +
-Human clarification note
-    ↓
-Human input review agent
-    ↓
-Updated ComplianceVerdict
-```
-
-## `ProposalCrew`
-
-File:
-
-```text
-src/bandai/crews/proposal_crew.py
-```
-
-### Purpose
-
-`ProposalCrew` generates proposal content for contracts approved by the compliance phase.
-
-It uses an internal auction-like pattern where department representatives compete to propose relevant capabilities, evidence, differentiators, and section contributions.
-
-### Configuration files
-
-`ProposalCrew` loads:
-
-```text
-agents_proposal.yaml
-tasks_proposal.yaml
-```
-
-### Main inputs
-
-- contract summary
-- company name
-- department profiles
-- total word limit
-
-### Department profiles
-
-The current implementation defines department profiles directly in `proposal_crew.py`.
-
-Current departments include:
-
-- Cloud Infrastructure
-- Cybersecurity
-- Software Development
-- Customer Support & SLA Management
-- Project Management Office
-
-Each department profile can include:
-
-- capabilities
-- certifications
-- case studies
-- KPIs
-
-This is currently hardcoded and should eventually move into a company knowledge base or onboarding-generated profile.
-
-### Agents and tasks
-
-#### 1. Department representative agents
-
-For each department in `DEPARTMENT_PROFILES`, the crew creates a department representative agent.
-
-Each representative uses:
-
-```python
-get_llm(fast=True)
-```
-
-Each department bid task runs with:
-
-```python
-async_execution=True
-```
-
-Each task outputs:
-
-```python
-DepartmentBid
-```
-
-#### 2. Auctioneer
-
-The auctioneer receives all department bid tasks as context:
-
-```python
-context=dept_bid_tasks
-```
-
-It chooses the strongest department contributions and produces:
-
-```python
-AuctionResult
-```
-
-#### 3. Proposal architect
-
-The proposal architect receives the auction result as context:
-
-```python
-context=[auction_task]
-```
-
-It uses:
-
-- `ProposalWriterTool`
-- main LLM configuration via `get_llm()`
-
-It produces:
-
-```python
-FinalProposal
-```
-
-### Output
-
-The primary output is:
-
-```python
-FinalProposal
-```
-
-The proposal includes:
-
-- tender reference
-- executive summary
-- proposal sections
-- appendices
-- compliance declarations
-- word count
-- quality score
-
-### Interaction flow
-
-```text
-Approved contract summary
-    ↓
-Department representatives, async
-    ↓
-DepartmentBid outputs
-    ↓
-Auctioneer
-    ↓
-AuctionResult
-    ↓
-Proposal architect
-    ↓
-FinalProposal
-```
-
-## Cross-Crew Data Flow
-
-The full workflow across crews is:
-
-```text
-User preferences
-    ↓
-ScoutCrew
-    ↓
-ResolvedContract opportunities
-    ↓
-main.py parses/resolves contract dictionaries
-    ↓
-ComplianceCrew
-    ↓
-ComplianceVerdict
-    ↓
-GO / CONDITIONAL-GO contracts
-    ↓
-ProposalCrew
-    ↓
-FinalProposal
-```
-
-## Current Limitations
-
-- Some tools used by the crews are still mock implementations.
-- Department profiles are currently hardcoded in `proposal_crew.py`.
-- Company profile data is still partially hardcoded in configuration.
-- Some handoffs still use dictionaries instead of fully typed Pydantic models.
-- Crew configuration is split across Python and YAML, so prompt changes require careful coordination.
-- Full execution requires a configured LLM provider and sufficient credits.
-- The project currently uses direct crew orchestration rather than CrewAI Flows.
-
-## Future Improvements
-
-Potential improvements include:
-
-- Add a `CompanyOnboardingCrew`.
-- Move department profiles into the `knowledge/` directory.
-- Improve YAML prompts with stricter structured inputs and outputs.
-- Add validation tests for each crew.
-- Add integration tests for cross-crew handoffs.
-- Replace dictionary handoffs with typed models.
-- Add diagrams for crew-level interactions.
-- Evaluate whether CrewAI Flows would make the sequential pipeline more explicit and easier to test.
+---
+
+## Shared Configuration
+
+Every crew applies these settings to all agents:
+
+| Setting | Value | Purpose |
+| -------------------------- | ------- | -------------------------------------- |
+| `max_retry_limit` | 2 | Retry on LLM errors |
+| `respect_context_window` | True | Auto-summarize when tokens exceed |
+| `memory` (crew-level) | `get_memory()` | Cross-session learning with unified LLM and embedder from env |
+| `knowledge_sources` | company profile JSON | Semantic embedding of company data |
+| `process` | sequential / hierarchical | Proposal uses `hierarchical` for true async parallelism; Scout and Compliance use `sequential` for strict ordering |
+| `allow_delegation` | False (all agents) | Prevents agents from delegating tasks to each other |
