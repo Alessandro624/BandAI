@@ -1,298 +1,100 @@
-# Tools Architecture
+# Tools
 
-## Overview
+Four custom CrewAI tools, all in `tools/crawler_tools.py`. All extend `BaseTool` and use Pydantic input schemas.
 
-BandAI uses CrewAI tools to provide agents with operational capabilities beyond pure reasoning.
+## TenderCrawlerTool
 
-The current tool implementations are defined in:
+Crawls a procurement portal for matching tenders.
+
+**Input:** `CrawlerInput`
 
 ```text
-src/bandai/tools/crawler_tools.py
+portal_name: str   - Human-readable portal name
+base_url: str      - Portal entry URL
+keywords: list[str] - Search terms (accepts string or JSON array)
+max_results: int   - Limit, default 10
 ```
 
-Despite the filename, this module currently contains several tool categories:
+**Output:** JSON array of tender notices with keys: `portal`, `url`, `title`, `contract_id`, `contracting_authority`, `deadline`, `value_euros`, `raw_text`.
 
-- tender crawling
-- contract detail lookup
-- compliance checking
-- proposal document generation
+**Status:** Stub. Returns mock data with randomized values. The real implementation needs `httpx` + `BeautifulSoup` for portal-specific scraping. The mock is sufficient for end-to-end pipeline testing.
 
-Some tools are currently mock implementations and are intended to be replaced with real integrations over time.
+**Used by:** Crawler Agent (Scout crew, one instance per portal).
 
-## Input Schemas
+---
 
-The tools use Pydantic input schemas to define and validate expected arguments.
+## ContractDetailTool
 
-| Schema | Used by | Purpose |
-|---|---|---|
-| `CrawlerInput` | `TenderCrawlerTool` | Defines portal crawling inputs |
-| `ContractLookupInput` | `ContractDetailTool` | Defines contract lookup inputs |
-| `ComplianceInput` | `ComplianceCheckerTool` | Defines compliance analysis inputs |
-| `DocumentGeneratorInput` | `ProposalWriterTool` | Defines proposal document generation inputs |
+Fetches full metadata for a single tender by Contract ID.
 
-## `CrawlerInput`
-
-Fields:
-
-- `portal_name`: human-readable name of the procurement portal.
-- `base_url`: entry URL of the portal to crawl.
-- `keywords`: list of keywords to search for.
-- `max_results`: maximum number of contracts to return.
-
-The `keywords` field includes a validator that accepts either a list or a JSON/string input. If a string cannot be parsed as JSON, it is treated as a single keyword.
-
-## `ContractLookupInput`
-
-Fields:
-
-- `contract_id`: unique identifier of the contract.
-- `portal_url`: portal URL where the contract was found.
-
-This schema is used when an agent needs to enrich or verify an individual tender notice.
-
-## `ComplianceInput`
-
-Fields:
-
-- `tender_raw_text`: raw tender text to analyze.
-- `company_profile_json`: JSON string containing company profile information.
-
-This schema is intended for tools that compare tender requirements against company capabilities.
-
-## `DocumentGeneratorInput`
-
-Fields:
-
-- `title`: title of the generated document.
-- `sections`: mapping from section titles to Markdown content.
-- `output_path`: output filename for the generated document.
-
-## Tool Summary
-
-| Tool | Current status | Main responsibility |
-|---|---|---|
-| `TenderCrawlerTool` | Mock | Return matching tender notices as JSON |
-| `ContractDetailTool` | Mock | Return detailed metadata for a contract |
-| `ComplianceCheckerTool` | Mock | Return structured compliance gap analysis |
-| `ProposalWriterTool` | Functional basic implementation | Write a Markdown proposal document to disk |
-
-## `TenderCrawlerTool`
-
-### Purpose
-
-`TenderCrawlerTool` is intended to crawl a procurement portal and return matching tender notices.
-
-### Inputs
-
-- `portal_name`
-- `base_url`
-- `keywords`
-- `max_results`
-
-### Output
-
-A JSON array of tender-like objects.
-
-The current mock output includes fields such as:
-
-- `portal`
-- `url`
-- `title`
-- `contract_id`
-- `contracting_authority`
-- `deadline`
-- `value_euros`
-- `raw_text`
-
-### Current limitations
-
-- It does not perform real HTTP crawling.
-- It does not parse real procurement pages.
-- It returns random mock contract IDs and values.
-- It currently uses `value_euros`, while the main contract model uses `value_eur`.
-- It does not currently return `cpv_codes`, although downstream tasks may expect them.
-
-### Future improvements
-
-- Implement real crawling with `httpx` and `BeautifulSoup`.
-- Add portal-specific adapters.
-- Normalize output fields to match `RawContract`.
-- Add CPV extraction.
-- Add deadline and value parsing.
-- Add retry and timeout handling.
-- Add tests using static HTML fixtures.
-
-## `ContractDetailTool`
-
-### Purpose
-
-`ContractDetailTool` is intended to fetch full metadata for a single tender notice.
-
-### Inputs
-
-- `contract_id`
-- `portal_url`
-
-### Output
-
-A JSON object containing metadata and completeness indicators.
-
-The current mock output includes:
-
-- `contract_id`
-- `source_url`
-- `completeness_score`
-- `has_technical_spec`
-- `has_admin_clauses`
-- `has_award_criteria`
-
-### Current limitations
-
-- It does not call a real open data API yet.
-- Metadata is randomly generated.
-- It does not fetch annexes or administrative documents.
-- It does not verify whether the contract ID exists.
-
-### Future improvements
-
-- Integrate with public procurement open data APIs.
-- Fetch contract documents and annexes.
-- Add document availability checks.
-- Add source traceability.
-- Return typed structured metadata.
-
-## `ComplianceCheckerTool`
-
-### Purpose
-
-`ComplianceCheckerTool` is intended to compare tender requirements against the company profile.
-
-### Inputs
-
-- `tender_raw_text`
-- `company_profile_json`
-
-### Output
-
-A JSON object with requirement analysis.
-
-The current mock output includes:
-
-- `met`
-- `missing`
-- `uncertain`
-
-### Current limitations
-
-- It does not perform real requirement extraction.
-- It does not parse the company profile JSON.
-- It returns static mock findings.
-- It does not distinguish legal, technical, financial, and certification requirements.
-
-### Future improvements
-
-- Add semantic extraction of tender requirements.
-- Parse and validate company profile data.
-- Classify requirements by category.
-- Add confidence scores.
-- Return citations to tender text.
-- Support structured compliance checklists.
-
-## `ProposalWriterTool`
-
-### Purpose
-
-`ProposalWriterTool` writes a Markdown proposal document from structured proposal sections.
-
-### Inputs
-
-- `title`
-- `sections`
-- `output_path`
-
-### Output
-
-A confirmation message containing the output path.
-
-### Current behavior
-
-The tool:
-
-1. Creates a Markdown heading from the proposal title.
-2. Adds each section as a Markdown `##` heading.
-3. Writes the assembled content to the specified output path using UTF-8 encoding.
-4. Returns either a success message or an error message.
-
-### Current limitations
-
-- It writes Markdown only.
-- It does not create parent directories automatically.
-- It does not sanitize output paths.
-- It does not support DOCX or PDF export.
-- It returns plain text instead of a structured result object.
-
-### Future improvements
-
-- Add output path validation.
-- Create parent directories automatically.
-- Return structured JSON status.
-- Add DOCX/PDF generation.
-- Add proposal templates.
-- Add tests for generated Markdown content.
-
-## Tool Usage by Crews
-
-| Crew | Tools used |
-|---|---|
-| `ScoutCrew` | `TenderCrawlerTool`, `ContractDetailTool` |
-| `ComplianceCrew` | `ComplianceCheckerTool` |
-| `ProposalCrew` | `ProposalWriterTool` |
-
-## Cross-Crew Tool Flow
+**Input:** `ContractLookupInput`
 
 ```text
-ScoutCrew
-    ↓
-TenderCrawlerTool
-    ↓
-ContractDetailTool
-    ↓
-Resolved opportunities
-    ↓
-ComplianceCrew
-    ↓
-ComplianceCheckerTool
-    ↓
-ComplianceVerdict
-    ↓
-ProposalCrew
-    ↓
-ProposalWriterTool
-    ↓
-Markdown proposal output
+contract_id: str  - Unique tender identifier
+portal_url: str   - Source portal URL
 ```
 
-## Current Limitations
+**Output:** JSON with `contract_id`, `source_url`, `completeness_score`, and boolean flags for `has_technical_spec`, `has_admin_clauses`, `has_award_criteria`.
 
-The tools layer is still early-stage.
+**Status:** Stub. The real implementation should hit the ANAC open data API at `https://dati.anticorruzione.it/opendata/`.
 
-Main limitations:
+**Used by:** Crawler Agent and Resolution Agent (Scout crew).
 
-- Most tools are still mock implementations.
-- Outputs are not always aligned with Pydantic models.
-- Random mock data makes deterministic tests harder.
-- Portal-specific behavior is not implemented yet.
-- Document parsing, OCR, and PDF support are not implemented yet.
+---
 
-## Future Improvements
+## ComplianceCheckerTool
 
-Potential improvements include:
+Cross-references company profile against tender requirements.
 
-- Replace mock crawler behavior with real portal adapters.
-- Add PDF parsing.
-- Add OCR extraction.
-- Add procurement portal adapters.
-- Add semantic requirement extraction.
-- Add deterministic test fixtures.
-- Add typed tool outputs.
-- Align tool output keys with `RawContract` and `ResolvedContract`.
+**Input:** `ComplianceInput`
+
+```text
+tender_raw_text: str       - Full tender text
+company_profile_json: str  - Company profile as JSON string
+```
+
+**Output:** JSON with three lists: `met`, `missing`, `uncertain`.
+
+**Status:** Stub. Returns hardcoded example analysis. The real implementation needs NLP extraction to map tender requirements to company certifications, turnover thresholds, and past contract history.
+
+**Used by:** Advocate and Auditor agents (Compliance crew).
+
+---
+
+## ProposalWriterTool
+
+Writes a Markdown proposal document to disk.
+
+**Input:** `DocumentGeneratorInput`
+
+```text
+title: str              - Document title
+sections: dict[str, str] - Section name -> Markdown content
+output_path: str        - File path, default "output/proposal_output.md"
+```
+
+**Output:** Confirmation string with the file path, or an error message.
+
+**Behavior:** Creates parent directories automatically (`mkdir(parents=True)`). Overwrites existing files. Writes UTF-8 encoded Markdown.
+
+**Status:** Functional. This is the only tool with a real implementation.
+
+**Used by:** Proposal Architect (Proposal crew).
+
+---
+
+## Input Schema Details
+
+All schemas use Pydantic `Field` descriptions for LLM-readable documentation:
+
+- `CrawlerInput` - `keywords` field has a `@field_validator` that accepts either a JSON string or a raw string, converting single values to `["value"]`.
+- `ContractLookupInput` - Straightforward key-value lookup.
+- `DocumentGeneratorInput` - Default output path is `output/proposal_output.md`.
+- `ComplianceInput` - Expects the full company profile as a serialized JSON string, which the agent constructs from knowledge.
+
+## Adding a New Tool
+
+1. Define a Pydantic input schema in `tools/crawler_tools.py`.
+2. Create a class extending `BaseTool` with `name`, `description`, `args_schema`, and `_run()`.
+3. Import and assign to the relevant agent via the `tools=[]` parameter.
+4. Add tests in `tests/test_config.py` or a new `tests/test_tools.py`.
