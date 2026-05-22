@@ -1,263 +1,200 @@
-# Data Models Architecture
+# Data Models
 
-## Overview
+All models use Pydantic v2 for validation and serialization. Pipeline models are in `models/models.py`; knowledge models are in `models/knowledge.py`.
 
-BandAI uses Pydantic models to define structured data exchanged between crews, tasks, and pipeline phases.
+## Knowledge Models
 
-The models are defined in:
+### CompanyProfile
 
-```text
-src/bandai/models/models.py
+The single source of truth for company data. Loaded from `knowledge/company_profile.json` via `load_company_profile()`.
+
+```python
+class CompanyProfile(BaseModel):
+    name: str
+    vat_number: str
+    ateco_codes: list[str]
+    certifications: list[str]
+    turnover_last_3y_eur: list[float]
+    employees: int
+    max_bid_value_eur: float
+    past_public_contracts: list[PastContract]
+    departments: dict[str, DepartmentProfile]
 ```
 
-These models help make agent outputs more predictable and easier to validate.
+Every crew reads this at build time. The profile is injected into task descriptions (as formatted strings) and also embedded as a CrewAI `StringKnowledgeSource` for semantic retrieval.
 
-## Model Groups
+### DepartmentProfile
 
-The current models can be grouped into four areas:
+Capabilities and evidence for a single department.
 
-| Area | Models |
-|---|---|
-| Contract discovery | `RawContract`, `ResolvedContract` |
-| Compliance analysis | `AdvocateAnalysis`, `AuditorChallenge`, `ComplianceVerdict` |
-| Proposal auction | `DepartmentBid`, `AuctionResult` |
-| Final proposal | `FinalProposal` |
+```python
+class DepartmentProfile(BaseModel):
+    capabilities: list[str]
+    certifications: list[str]
+    case_studies: list[str]
+    kpis: dict[str, Any]
+```
 
-## Contract Discovery Models
+Keys in the `departments` dict become department names. Each department gets its own agent in the Proposal crew.
 
-### `RawContract`
+### PastContract
 
-Represents an initial tender notice found by crawler tools or procurement portals.
+A previously completed public contract.
 
-Main fields:
+```python
+class PastContract(BaseModel):
+    title: str
+    value_eur: float
+    cpv_codes: list[str]
+    year: int
+    authority: str
+    topics: list[str]
+```
 
-- `portal`: source portal name
-- `url`: tender URL
-- `title`: tender title
-- `contract_id`: optional source-specific contract identifier
-- `contracting_authority`: public authority issuing the tender
-- `deadline`: submission deadline
-- `value_eur`: optional tender value in EUR
-- `cpv_codes`: list of CPV codes
-- `raw_text`: raw extracted tender text
+Used by the Compliance crew to demonstrate track record.
 
-Used by:
+---
 
-- crawler tools
-- scouting phase
-- tender discovery workflows
+## Scouting Models
 
-### `ResolvedContract`
+### RawContract
 
-Represents a normalized and deduplicated tender opportunity.
+Unprocessed tender scraped from a portal. Note the `cpvCodes` alias - portal data may use camelCase.
 
-Main fields:
+```python
+class RawContract(BaseModel):
+    portal: str
+    url: str
+    title: str
+    contract_id: str | None = None
+    contracting_authority: str
+    deadline: str
+    value_eur: float | None = None
+    cpv_codes: list[str] = Field(alias="cpvCodes")
+    raw_text: str
+```
 
-- `canonical_contract_id`
-- `title`
-- `contracting_authority`
-- `deadline`
-- `value_eur`
-- `cpv_codes`
-- `sources`
-- `consensus_score`
-- `canonical_url`
+### ResolvedContract
 
-`consensus_score` is constrained between `0.0` and `1.0`.
+Deduplicated, canonical tender with consensus metadata. This is the output of the Resolution Agent.
 
-Used by:
+```python
+class ResolvedContract(BaseModel):
+    canonical_contract_id: str
+    title: str
+    contracting_authority: str
+    deadline: str
+    value_eur: float | None
+    cpv_codes: list[str]
+    sources: list[str]
+    consensus_score: float = Field(ge=0.0, le=1.0)
+    canonical_url: str
+```
 
-- `ScoutCrew`
-- `run_scouting()`
-- compliance phase input
+`consensus_score` = portal_weight × (portals_that_listed / total_portals_crawled). Higher means more reliable deduplication.
+
+---
 
 ## Compliance Models
 
-### `AdvocateAnalysis`
+### AdvocateAnalysis
 
-Represents the positive/bid-supporting analysis produced by the advocate agent.
+The optimist's view. Every requirement maps to a category.
 
-Main fields:
-
-- `requirements_met`
-- `requirements_potentially_met`
-- `risk_mitigations`
-- `overall_sentiment`
-- `confidence_score`
-- `summary`
-
-`confidence_score` is constrained between `0.0` and `1.0`.
-
-Allowed sentiment values:
-
-```text
-strongly_positive
-positive
-cautiously_positive
+```python
+class AdvocateAnalysis(BaseModel):
+    requirements_met: list[str]
+    requirements_potentially_met: list[str]
+    risk_mitigations: list[str]
+    overall_sentiment: Literal["strongly_positive", "positive", "cautiously_positive"]
+    confidence_score: float = Field(ge=0.0, le=1.0)
+    summary: str
 ```
 
-### `AuditorChallenge`
+### AuditorChallenge
 
-Represents the critical/risk-focused analysis produced by the auditor agent.
+The skeptic's rebuttal.
 
-Main fields:
-
-- `hard_blockers`
-- `soft_risks`
-- `advocate_overestimates`
-- `overall_sentiment`
-- `risk_score`
-- `summary`
-
-`risk_score` is constrained between `0.0` and `1.0`.
-
-Allowed sentiment values:
-
-```text
-high_risk
-medium_risk
-manageable_risk
+```python
+class AuditorChallenge(BaseModel):
+    hard_blockers: list[str]
+    soft_risks: list[str]
+    advocate_overestimates: list[str]
+    overall_sentiment: Literal["high_risk", "medium_risk", "manageable_risk"]
+    risk_score: float = Field(ge=0.0, le=1.0)
+    summary: str
 ```
 
-### `ComplianceVerdict`
+### ComplianceVerdict
 
-Represents the final bid/no-bid decision for a contract.
+The binding decision. This is the output that drives flow routing.
 
-Main fields:
-
-- `bid_decision`
-- `conditions`
-- `key_risks`
-- `key_strengths`
-- `compliance_score`
-- `legal_flags`
-- `verdict_rationale`
-
-Allowed bid decisions:
-
-```text
-GO
-NO-GO
-CONDITIONAL-GO
+```python
+class ComplianceVerdict(BaseModel):
+    bid_decision: Literal["GO", "NO-GO", "CONDITIONAL-GO"]
+    conditions: list[str] = Field(default_factory=list)
+    key_risks: list[str]
+    key_strengths: list[str]
+    compliance_score: float = Field(ge=0.0, le=1.0)
+    legal_flags: list[str] = Field(default_factory=list)
+    verdict_rationale: str
 ```
 
-`compliance_score` is constrained between `0.0` and `1.0`.
+- `bid_decision` directly maps to flow routing in `route_verdict()`.
+- `conditions` is populated only for CONDITIONAL-GO. Each condition is a concrete action required before submission.
+- `legal_flags` references specific D.Lgs. 36/2023 articles.
+- `verdict_rationale` is written in plain Italian for the CEO (max 150 words).
 
-Used by:
+---
 
-- `ComplianceCrew`
-- human review loop
-- proposal phase filtering
-- pipeline summary output
+## Proposal Models
 
-## Proposal Auction Models
+### DepartmentBid
 
-### `DepartmentBid`
+A department's pitch for inclusion in the proposal.
 
-Represents a department-level contribution proposal.
-
-Main fields:
-
-- `department`
-- `headline_capability`
-- `evidence`
-- `differentiators`
-- `suggested_section`
-- `relevance_score`
-- `evidence_quality_score`
-- `word_budget`
-
-Both `relevance_score` and `evidence_quality_score` are constrained between `0.0` and `1.0`.
-
-Used by:
-
-- department representative agents in `ProposalCrew`
-- auctioneer task
-
-### `AuctionResult`
-
-Represents the auctioneer's decision after evaluating all department bids.
-
-Main fields:
-
-- `winning_bids`
-- `rejected_bids`
-- `section_allocation`
-- `total_word_budget`
-- `rationale`
-
-Used by:
-
-- auctioneer agent
-- proposal architect agent
-
-## Final Proposal Model
-
-### `FinalProposal`
-
-Represents the final structured proposal output.
-
-Main fields:
-
-- `tender_ref`
-- `executive_summary`
-- `sections`
-- `appendices`
-- `compliance_declarations`
-- `word_count`
-- `quality_score`
-
-`quality_score` is constrained between `0.0` and `1.0`.
-
-Used by:
-
-- `ProposalCrew`
-- `run_proposals()`
-- output serialization to `output/03_proposal_*.json`
-
-## Cross-Phase Data Flow
-
-```text
-RawContract
-    ↓
-ResolvedContract
-    ↓
-ComplianceVerdict
-    ↓
-DepartmentBid
-    ↓
-AuctionResult
-    ↓
-FinalProposal
+```python
+class DepartmentBid(BaseModel):
+    department: str
+    headline_capability: str
+    evidence: list[str]
+    differentiators: list[str]
+    suggested_section: str
+    relevance_score: float = Field(ge=0.0, le=1.0)
+    evidence_quality_score: float = Field(ge=0.0, le=1.0)
+    word_budget: int
 ```
 
-In practice, some handoffs are still dictionary-based in `main.py`, but the target architecture should increasingly rely on these typed models.
+`evidence_quality_score` is self-reported by the department agent. The auctioneer trusts it but applies it as one component of the composite score, so gaming a single dimension doesn't win.
 
-## Validation Rules
+### AuctionResult
 
-The models currently enforce:
+The auctioneer's selection.
 
-- score values between `0.0` and `1.0`
-- restricted decision values through `Literal`
-- default empty lists for optional collections such as `conditions`, `legal_flags`, and `appendices`
+```python
+class AuctionResult(BaseModel):
+    winning_bids: list[DepartmentBid]
+    rejected_bids: list[str]
+    section_allocation: dict[str, str]
+    total_word_budget: int
+    rationale: str
+```
 
-## Current Limitations
+`rejected_bids` entries include a rejection reason: `low_score`, `section_already_covered`, or `word_budget_exceeded`.
 
-- Some dates are stored as plain strings instead of typed date fields.
-- Some URLs are stored as plain strings instead of URL-validated types.
-- Some cross-phase handoffs still use dictionaries.
-- `RawContract.cpv_codes` currently uses the alias `cpvCodes`, while other parts of the system may refer to `cpv_codes`.
-- `word_budget` and `word_count` do not yet enforce non-negative constraints.
-- The models do not yet include company profile or department profile schemas.
+### FinalProposal
 
-## Future Improvements
+The complete proposal document.
 
-Potential improvements include:
+```python
+class FinalProposal(BaseModel):
+    tender_ref: str
+    executive_summary: str
+    sections: dict[str, str]
+    appendices: list[str] = Field(default_factory=list)
+    compliance_declarations: list[str]
+    word_count: int
+    quality_score: float = Field(ge=0.0, le=1.0)
+```
 
-- Add date validation for tender deadlines.
-- Add URL validation for tender and source URLs.
-- Add non-negative constraints for budgets and word counts.
-- Add company profile and department profile models.
-- Standardize CPV field naming across tools, prompts, and models.
-- Replace dictionary handoffs in `main.py` with typed model instances.
-- Add unit tests for model validation.
+The `ProposalWriterTool` converts `sections` into a Markdown file on disk. `quality_score` is the architect's self-assessment.
