@@ -275,6 +275,7 @@ class BandAIFlow(Flow[BandAIState]):
         # Exit 1: user skipped
         if not human_note:
             log.info("  Human skipped - keeping CONDITIONAL-GO as-is.")
+            self.state.approved_contracts.append((contract, self.state.current_verdict))
             self._save_compliance_result()
             self.state.current_contract_index += 1
             return
