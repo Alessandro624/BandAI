@@ -37,14 +37,14 @@ class ProviderProfile(BaseModel):
     @property
     def main_model(self) -> str:
         """Full model identifier in provider/model format."""
-        if "/" in self.main.model:
+        if f"{self.name}/" in self.main.model:
             return self.main.model
         return f"{self.name}/{self.main.model}"
 
     @property
     def fast_model(self) -> str:
         """Full model identifier in provider/model format."""
-        if "/" in self.fast.model:
+        if f"{self.name}/" in self.fast.model:
             return self.fast.model
         return f"{self.name}/{self.fast.model}"
 

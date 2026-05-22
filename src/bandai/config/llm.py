@@ -38,7 +38,7 @@ def get_llm(fast: bool = False) -> BaseLLM:  # type: ignore[valid-type]
     api_key = get_api_key() if provider.env_key else None
 
     # If profile_model already contains provider prefix, use it; otherwise combine with provider.name
-    model_id = profile_model if "/" in profile_model else f"{provider.name}/{profile_model}"
+    model_id = profile_model if f"{provider.name}/" in profile_model else f"{provider.name}/{profile_model}"
 
     return LLM(
         model=model_id,
