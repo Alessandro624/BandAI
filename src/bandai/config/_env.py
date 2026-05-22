@@ -18,7 +18,7 @@ class EnvOverrides(BaseModel):
 
     @classmethod
     def from_env(cls, prefix: str) -> EnvOverrides:
-        """Read overrides for *prefix* (MAIN_ or FAST_)."""
+        """Read overrides for prefix (MAIN_ or FAST_)."""
 
         def _float(key: str) -> float | None:
             raw = os.getenv(key)

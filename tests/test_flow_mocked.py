@@ -22,7 +22,7 @@ def _install_import_stubs_when_crewai_is_unavailable() -> None:
 
     The real project depends on CrewAI, but these tests monkeypatch every crew
     call.  When CrewAI is not installed locally, minimal stubs are enough to
-    import ``bandai.flow`` and exercise its pure orchestration logic.
+    import bandai.flow and exercise its pure orchestration logic.
     """
     try:
         importlib.import_module("crewai.flow.flow")
