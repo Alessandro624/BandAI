@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Type, Literal, Optional
 
 from crewai.tools import BaseTool  # type: ignore
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, HttpUrl, Field, field_validator
 
 from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeout
 
@@ -197,8 +197,11 @@ class ProposalWriterTool(BaseTool):
 ### -----------------------------------------------------------------------------------
 
 PROCESS_CONFIG: dict[str, PortalConfig] = { 
-    portal.name: portal 
-    for portal in BANDI_PORTALS if portal.is_ready_for_discovery() 
+    portal.name: portal for portal in BANDI_PORTALS
+}
+
+DISCOVERABLE_PORTALS: dict[str, PortalConfig] = {
+    portal.name: portal for portal in BANDI_PORTALS if portal.is_ready_for_discovery()
 }
 
 ## Input Schema
@@ -231,8 +234,8 @@ class TendersOverviewExtractorTool(BaseTool):
     args_schema: type[BaseModel] = TendersOverviewExtractorInput
 
     ## Internal Config
-    max_chars: int = 12000
-    timeout_ms: int = 30000
+    max_chars: int = 12_000
+    timeout_ms: int = 30_000
     headless_mode: bool = True #### DEBUG
 
 
@@ -257,16 +260,16 @@ class TendersOverviewExtractorTool(BaseTool):
         """
 
         ### Portal Name configuration:
-        if portal_name not in PROCESS_CONFIG.keys():
+        if portal_name not in DISCOVERABLE_PORTALS.keys():
             return self._error(
                 portal_name = portal_name, 
                 error_message = (
                     "No Configuration found for the current portal. "
-                    f"Available: { list(PROCESS_CONFIG.keys()) }"
+                    f"Available: { list(DISCOVERABLE_PORTALS.keys()) }"
                 )
             )
         
-        portal_cfg: DiscoveryProcess = PROCESS_CONFIG[portal_name].discovery
+        portal_cfg: DiscoveryProcess = DISCOVERABLE_PORTALS[portal_name].discovery
         
         search_url: str = str(portal_cfg.base_search_url)
 
@@ -291,7 +294,7 @@ class TendersOverviewExtractorTool(BaseTool):
                             "AppleWebKit/537.36 (KHTML, like Gecko) "
                             "Chrome/120.0.0.0 Safari/537.36"
                         ),
-                        viewport={ 'width': 1920, 'height': 1080 }
+                        viewport = { 'width': 1920, 'height': 1080 }
                 )
                 page = await context.new_page()
 
@@ -434,7 +437,7 @@ class TendersOverviewExtractorTool(BaseTool):
             await page.wait_for_selector(
                 locator_str,
                 state = 'visible',
-                timeout = 10000
+                timeout = 10_000
             )
 
             return await page.locator(locator_str).first.inner_html()
@@ -475,3 +478,166 @@ class TendersOverviewExtractorTool(BaseTool):
         Returns an error message that an Agent can parse.
         """
         return f"[ERROR on TendersOverviewExtraction] Portal: {portal_name} | Reason: {error_message}"
+    
+
+### -----------------------------------------------------------------------------------
+###
+###     Defining Tools for Information Extraction of a Tender
+###
+### -----------------------------------------------------------------------------------
+
+class SinglePageLoaderInput(BaseModel):
+    """
+    Input Schema for PageLoaderTool.
+    """
+    portal_name: str = Field(description = "Name of portal to Portal to reach")
+    url: HttpUrl | str = Field(description = "URL of the Tender's Detail Page to Load")
+
+## Main Tool Class
+class SinglePageLoaderTool(BaseTool):
+    """
+    Loads the Content of a Single Web Page and returns the content in a clean Markdown format.
+    It can handle both static and dynamic, JS-rendered pages.
+    """
+
+    name: str = "Single Page Loader"
+    description: str = (
+        "It can load a Web Page containg a specific Tender's Details."
+        "All the content will be turned into Markdown format - parsable to extract TenderInfo objects."
+    )
+
+    args_schema: type[BaseModel] = SinglePageLoaderInput
+
+    ## Internal Config
+    max_chars: int = 12_000
+    timeout_ms: int = 30_000
+    headless_mode: bool = True #### DEBUG
+
+    def _run(self, portal_name: str, url: HttpUrl | str) -> str:
+        """
+        Synchronous Entry point for CrewAI Agent.
+        """
+        return asyncio.run(self._load_page(portal_name, str(url)))
+    
+    async def _load_page(self, portal_name: str, url: str) -> str:
+        """
+        Loads asynchronously a Web Page and returns its content in Markdown Format.
+
+        Performed Steps:
+            1. Opens Playwright in headless mode,
+            2. Reaches the page by using the provided url.
+            3. Waits for the complete load of the page, if necessary.
+            4. Converts the selected HTML Content into Markdown through a utility function.
+        """
+
+        ### Portal Name configuration
+        portal_cfg: Optional[ExtractionProcess] = None
+        if portal_name in PROCESS_CONFIG.keys():
+            portal_cfg = PROCESS_CONFIG[portal_name].extraction
+
+        if portal_cfg and not url.startswith('http'):
+            url = str(portal_cfg.base_resource_url).rstrip('/') + url
+
+        log.info(f"[SinglePageLoader] Loading: {url} [{portal_name}]")
+
+        ## Main Instruction Process - Playwright Loop
+        browser = None
+        async with async_playwright() as p:
+            try:
+                browser = await p.chromium.launch(headless = self.headless_mode)
+                context = await browser.new_context(
+                        user_agent = (
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/120.0.0.0 Safari/537.36"
+                        ),
+                        viewport = { 'width': 1920, 'height': 1080 }
+                )
+                page = await context.new_page()
+
+                ## Prevents unuseful resources from loading to speed up the loading process
+                await page.route(
+                    "**/*.{png,jpg,jpeg,gif,svg,woff,woff2,ttf}",
+                    lambda route: route.abort()
+                )
+
+                try:
+                    await page.goto(
+                        url,
+                        wait_until = "networkidle",
+                        timeout = self.timeout_ms
+                    )
+
+                except PlaywrightTimeout:
+                    log.warning(f"[SinglePageLoader] Timeout on {url}, attempting partial recovery")
+
+                if portal_cfg:
+                    ## Get Main Content on specific portal
+                    html = await self._do_get_main_html_content(
+                        page = page, portal_cfg = portal_cfg
+                    )
+                else:
+                    ## Generic Fallback
+                    html = await page.content()
+
+                if not html:
+                    return self._error(url, "Page loaded but returned empty content")
+
+
+                ## Markdown Conversion
+                markdown = html_to_markdown(
+                    html,
+                    mode = 'extraction',
+                    max_chars = self.max_chars
+                )
+
+                if not markdown.strip():
+                    return self._error(url, "No content found after cleaning")
+
+                log.info(f"[SinglePageLoader] Extracted {len(markdown)} chars from {url}")
+                
+                return markdown
+
+            except Exception as e:
+                log.error(f"[SinglePageLoader] Error on {url}: {e}")
+                return self._error(url, str(e))
+
+            finally:
+                if browser:
+                    await browser.close()
+
+            
+
+    ## Support Methods
+    def _build_locator(self, selector: SelectorIdentifier) -> str:
+        """
+        Builds a Playwright locator string from a selector config.
+        """
+        match selector.type:
+            case "css":
+                return selector.text
+            case _: ## In general [type='content']
+                return f"[{selector.type}='{selector.text}']"
+
+    async def _do_get_main_html_content(self, page: Page, portal_cfg: ExtractionProcess) -> Optional[str]:
+        """
+        Extracts HTML from the configured list wrapper element.
+        """
+        wrapper_cfg = portal_cfg.main_content_selector
+
+        # No wrapper configured — fallback to full page
+        if not wrapper_cfg:
+            return await page.content()
+        
+        locator_str = self._build_locator(wrapper_cfg)
+        try:
+            return await page.locator(locator_str).first.inner_html(timeout = 10_000)
+        
+        except Exception as e:
+            log.warning(f"[SinglePageLoader] Element '{locator_str}' not found: {e}, falling back to full page")
+            return await page.content()   
+
+
+    def _error(self, url: str, reason: str) -> str:
+        return f"[ERROR SinglePageLoader] URL: {url} | Reason: {reason}"
+    
