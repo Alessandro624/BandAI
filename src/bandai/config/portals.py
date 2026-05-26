@@ -2,14 +2,50 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
+
+from pydantic import BaseModel, Field, HttpUrl
+from typing import Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pathlib import Path
 
 from bandai.utils import CONFIG_DIR
 
 log = logging.getLogger(__name__)
+
+
+
+### -----------------------------------------------------------------------------------
+###
+###     Defining Configuration Directives for Extraction Process
+###
+### -----------------------------------------------------------------------------------
+
+class SelectorIdentifier(BaseModel):
+    type: str
+    text: str
+
+class ActionDescription(BaseModel):
+    selector: SelectorIdentifier
+    action_type: Literal['click']
+    wait_after_action: Literal['networkidle'] | int
+
+
+class DiscoveryProcess(BaseModel):
+    
+    base_search_url: HttpUrl
+    elements_per_page: int
+
+    ## Main Selector
+    list_wrapper_selector: SelectorIdentifier
+    next_page_selector: SelectorIdentifier
+
+    actions_to_perform: list[ActionDescription]
+
+
+class ExtractionProcess(BaseModel):
+    base_resource_url: HttpUrl
+    main_content_selector: SelectorIdentifier
 
 
 # Portal Config Model
@@ -19,9 +55,21 @@ class PortalConfig(BaseModel):
     """Immutable configuration for a single procurement portal."""
 
     name: str
-    base_url: str
+    info: Optional[str] = None
+    base_url: Optional[str] = None
     reliability: float = Field(..., ge=0.0, le=1.0)
-    country_filter: str | None = None
+    country_filter: Optional[str] = None
+
+    discovery: Optional[DiscoveryProcess] = None
+    extraction: Optional[ExtractionProcess] = None
+
+    def is_ready_for_discovery(self) -> bool:
+        return self.discovery is not None
+
+    def is_ready_for_extraction(self) -> bool:
+        return self.discovery is not None
+
+
 
 
 # Loading
