@@ -197,7 +197,7 @@ class ProposalWriterTool(BaseTool):
 ### -----------------------------------------------------------------------------------
 
 PROCESS_CONFIG: dict[str, PortalConfig] = { 
-    portal['name']: portal 
+    portal.name: portal 
     for portal in BANDI_PORTALS if portal.is_ready_for_discovery() 
 }
 
@@ -268,7 +268,7 @@ class TendersOverviewExtractorTool(BaseTool):
         
         portal_cfg: DiscoveryProcess = PROCESS_CONFIG[portal_name].discovery
         
-        search_url: str = portal_cfg.base_search_url
+        search_url: str = str(portal_cfg.base_search_url)
 
         elements_per_page: int = portal_cfg.elements_per_page
         max_pages: int = (tenders_count // elements_per_page) + 1
@@ -285,7 +285,15 @@ class TendersOverviewExtractorTool(BaseTool):
         async with async_playwright() as p:
             try:
                 browser = await p.chromium.launch(headless = self.headless_mode)
-                page = await browser.new_page()
+                context = await browser.new_context(
+                        user_agent = (
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/120.0.0.0 Safari/537.36"
+                        ),
+                        viewport={ 'width': 1920, 'height': 1080 }
+                )
+                page = await context.new_page()
 
                 ## Prevents unuseful resources from loading to speed up the loading process
                 await page.route(
@@ -423,10 +431,16 @@ class TendersOverviewExtractorTool(BaseTool):
 
         locator_str = self._build_locator(wrapper_cfg)
         try:
-            return await page.locator(locator_str).first.inner_html(timeout=5000)
+            await page.wait_for_selector(
+                locator_str,
+                state = 'visible',
+                timeout = 10000
+            )
+
+            return await page.locator(locator_str).first.inner_html()
         
         except Exception as e:
-            log.warning(f"[TendersOverviewExtraction] List wrapper '{locator_str}' not found: {e}, falling back to full page")
+            log.warning(f"[TendersOverviewExtraction] Timeout waiting for '{locator_str}': {e}. Falling back to full page.")
             return await page.content()   
 
     async def _do_go_to_next_page(self, page, portal_cfg: DiscoveryProcess) -> bool:
@@ -461,4 +475,3 @@ class TendersOverviewExtractorTool(BaseTool):
         Returns an error message that an Agent can parse.
         """
         return f"[ERROR on TendersOverviewExtraction] Portal: {portal_name} | Reason: {error_message}"
-
