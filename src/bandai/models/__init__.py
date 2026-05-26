@@ -17,7 +17,7 @@ from .knowledge import (
     parse_company_profile,
 )
 
-from .discovery_models import (
+from .models import (
     AccessMode, Status,
 
     TenderOverview, DiscoveryResult,
