@@ -11,7 +11,7 @@ from typing import Type, Literal, Optional
 from crewai.tools import BaseTool  # type: ignore
 from pydantic import BaseModel, Field, field_validator
 
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+from playwright.async_api import async_playwright, Page, TimeoutError as PlaywrightTimeout
 
 from bandai.config import BANDI_PORTALS
 from bandai.config.portals import (
@@ -398,7 +398,7 @@ class TendersOverviewExtractorTool(BaseTool):
             case _: ## In general [type='content']
                 return f"[{selector.type}='{selector.text}']"
 
-    async def _do_apply_action_on_first_page(self, page, portal_cfg: DiscoveryProcess) -> None:
+    async def _do_apply_action_on_first_page(self, page: Page, portal_cfg: DiscoveryProcess) -> None:
         """
         Applies actions/filter on the main table for the first page.
         Useful for sorting based on Values using dynamic lists, etc.
@@ -419,7 +419,7 @@ class TendersOverviewExtractorTool(BaseTool):
                     else:
                         await page.wait_for_load_state(wait)
 
-    async def _do_get_list_html_content(self, page, portal_cfg: DiscoveryProcess) -> Optional[str]:
+    async def _do_get_list_html_content(self, page: Page, portal_cfg: DiscoveryProcess) -> Optional[str]:
         """
         Extracts HTML from the configured list wrapper element.
         """
@@ -443,7 +443,7 @@ class TendersOverviewExtractorTool(BaseTool):
             log.warning(f"[TendersOverviewExtraction] Timeout waiting for '{locator_str}': {e}. Falling back to full page.")
             return await page.content()   
 
-    async def _do_go_to_next_page(self, page, portal_cfg: DiscoveryProcess) -> bool:
+    async def _do_go_to_next_page(self, page: Page, portal_cfg: DiscoveryProcess) -> bool:
         """
         Clicks the next page button if available and not disabled.
         Returns True if navigation occurred, False otherwise.
