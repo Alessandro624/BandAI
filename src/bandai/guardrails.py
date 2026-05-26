@@ -74,6 +74,41 @@ def validate_json_array(
     )
 
 
+# JSON Object Validator
+
+
+def validate_json_obj(
+        result: TaskOutput
+):
+    """
+    Validate that the task output is a parseable JSON object.
+    """
+
+    raw: str = result.raw
+
+    if not raw or not raw.strip():
+        return (False, "Output must not be empty")
+
+    raw = re.sub(r"```json\s*", "", raw)
+    raw = re.sub(r"```\s*", "", raw)
+    raw = raw.strip()
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+
+    if start == -1 or end == -1:
+        return (False, "No JSON object found in the output")
+
+    json_str = raw[start:end+1]
+
+    try:
+        parsed = json.loads(json_str)
+        return (True, raw)
+    except json.JSONDecodeError as e:
+        return (False, "JSON Object is not Valid")
+
+
+
 # Compliance Verdict Validation
 
 
