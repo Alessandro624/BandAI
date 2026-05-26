@@ -56,7 +56,7 @@ class PortalConfig(BaseModel):
 
     name: str
     info: Optional[str] = None
-    base_url: Optional[str] = None
+    base_url: Optional[HttpUrl] = None
     reliability: float = Field(..., ge=0.0, le=1.0)
     country_filter: Optional[str] = None
 
