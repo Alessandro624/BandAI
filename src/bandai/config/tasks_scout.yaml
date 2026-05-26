@@ -88,3 +88,84 @@ preference_filter_task:
     A raw JSON array starting with '[' and ending with ']'.
     No text before or after the array.
   agent: preference_filter_agent
+
+
+
+discovery_task:
+  description: >
+    Search the {portal_name} portal for public tenders aimed at Italian 
+    public administrations. Use the TendersOverviewExtractorTool to build 
+    the response JSON structure.
+    Collect exactly {tenders_count} tender overviews. 
+    For each tender found, extract the following fields:\n
+    - title: tender title if available, null otherwise\n
+    - url: direct URL to the tender detail page (required)
+    - portal: always '{portal_name}'\n
+    - access_mode: 'html' for web pages, 'api' for API endpoints\n
+    - metadata: any additional data available (deadline, CIG)\n
+    
+    Rules:\n
+    - Do not guess missing fields, use null\n
+    - Return exactly the JSON schema as specified
+  expected_output: >
+    A valid object following the DiscoveryResult schema:\n
+    {\n
+      "tenders": [\n
+        {\n
+          "title": "string or null",\n
+          "url": "https://...",\n
+          "portal": "{portal_name}",\n
+          "access_mode": "html",\n
+          "metadata": {}\n
+        }\n
+      ],\n
+      "portal": "{portal_name}",\n
+      "status": "success"\n
+    }
+  agent: discovery_agent
+
+extraction_task:
+  description: >
+    Load the tender detail page at: [{tender.portal.upper(}}] {tender.url}.
+    Known title: {tender.title or 'not available'}\n\n
+    Extract all available information from the page and build a TenderInfo object.\n
+    Fields to extract:\n
+    - cig: Codice Identificativo Gara\n
+    - cup: Codice Unico di Progetto\n
+    - title: full tender title\n
+    - url: the page URL\n
+    - cpv: list of CPV codes\n
+    - contract_type: i.e Services / Supplies / Works\n
+    - contracting_authority: name and tax_code\n
+    - base_amount: base auction amount in euros\n
+    - max_amount: maximum value including renewals\n
+    - publication_date: ISO format (YYYY-MM-DD)\n
+    - deadline: bid submission deadline, ISO format\n
+    - contract_duration_months: integer\n
+    - url_docs: list of links to documents and attachments\n\n
+    Rules:\n
+    - Set missing fields to null, never guess\n
+    - Preserve all document links found on the page\n
+    - Return status 'partial' if less than half the fields are populated
+  expected_output: >
+    A valid object following the DiscoveryResult schema:\n
+    {\n
+      "cig": "string or null",\n
+      "cup": "string or null",\n
+      "title": "string",\n
+      "url": "https://...",\n
+      "cpv": ["code1", "code2"] or null,\n
+      "contract_type": "string or null",\n
+      "contracting_authority": {"name": "string or null", "tax_code": "string or null"} or null,\n
+      "base_amount": float or null,\n
+      "max_amount": float or null,\n
+      "publication_date": "YYYY-MM-DD or null",\n
+      "deadline": "YYYY-MM-DDTHH:MM:SS or null",\n
+      "contract_duration_months": integer or null,\n
+      "url_docs": ["https://..."] or null,\n
+      "portal": "string",\n
+      "status": "success" or "partial" or "error",\n
+      "error": null\n
+    }
+  agent: extractor_agent
+
