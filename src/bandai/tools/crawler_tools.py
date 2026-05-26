@@ -3,11 +3,23 @@ from __future__ import annotations
 import json
 import logging
 import random
+import asyncio
+
 from pathlib import Path
-from typing import Type
+from typing import Type, Literal, Optional
 
 from crewai.tools import BaseTool  # type: ignore
 from pydantic import BaseModel, Field, field_validator
+
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+
+from bandai.config import BANDI_PORTALS
+from bandai.config.portals import (
+    PortalConfig,
+    SelectorIdentifier, ActionDescription, 
+    DiscoveryProcess, ExtractionProcess
+)
+from bandai.utils import html_to_markdown
 
 log = logging.getLogger(__name__)
 
@@ -175,3 +187,278 @@ class ProposalWriterTool(BaseTool):
         except IOError as e:
             log.error("Failed to write proposal to %s: %s", output_path, e)
             return f"Error writing proposal to {output_path}: {e}"
+
+
+
+### -----------------------------------------------------------------------------------
+###
+###     Defining Tools for Discovery and Construction of Tenders Overview
+###
+### -----------------------------------------------------------------------------------
+
+PROCESS_CONFIG: dict[str, PortalConfig] = { 
+    portal['name']: portal 
+    for portal in BANDI_PORTALS if portal.is_ready_for_discovery() 
+}
+
+## Input Schema
+class TendersOverviewExtractorInput(BaseModel):
+    """
+    Input Schema for the Tenders' Overview Extraction Tool.
+    """
+    portal_name: str = Field(description = "Available Portal Name to reach.")
+    tenders_count: int = Field(
+        default = 10,
+        description = "Number of Tenders to get from the Portal"
+    )
+
+
+## Main Tool Class
+class TendersOverviewExtractorTool(BaseTool):
+    """
+    Navigates a tender listing portal, given as input, across multiple pages and 4
+    returns all tenders found in Markdown format.
+    In this way, the content is LLM-ready to be parsed into custom data structures (TenderOverview).
+    Pagination and portal-specific actions are handled based on the portal configuration file.
+    """
+
+    name: str = "Tenders' Overview Extractor"
+    description: str = (
+        "This Tool can nagigate a portal searching for different tenders, presented in a list format."
+        "It can handle pagination automatically."
+        "All the content will be turned into Markdown format - parsable to extract TenderOverview objects."
+    )
+    args_schema: type[BaseModel] = TendersOverviewExtractorInput
+
+    ## Internal Config
+    max_chars: int = 12000
+    timeout_ms: int = 30000
+    headless_mode: bool = True #### DEBUG
+
+
+    def _run(self, portal_name: str, tenders_count: int) -> str:
+        """
+        Synchronous entry point for CrewAI Agent.
+        """
+        return asyncio.run(self._extract(portal_name, tenders_count))
+
+    async def _extract(self, portal_name: str, tenders_count: int) -> str:
+        """
+        Loads asynchronously a Web Page containing a list-like content and returns its content in Markdown Format.
+
+        Performed Steps:
+            1. Read the Portal Configuration to perform the process.
+            2. Opens Playwright in headless mode.
+            3. If provided, applies portal-specific actions on the first page (Main table interacion).
+            4. Extract the list wrapper HTML content
+            5. Converts the content into Markdown through a utility function.
+            6. Loops over pages if needed.
+            7. Returns the aggregated Markdown content for the Agent to parse
+        """
+
+        ### Portal Name configuration:
+        if portal_name not in PROCESS_CONFIG.keys():
+            return self._error(
+                portal_name = portal_name, 
+                error_message = (
+                    "No Configuration found for the current portal. "
+                    f"Available: { list(PROCESS_CONFIG.keys()) }"
+                )
+            )
+        
+        portal_cfg: DiscoveryProcess = PROCESS_CONFIG[portal_name].discovery
+        
+        search_url: str = portal_cfg.base_search_url
+
+        elements_per_page: int = portal_cfg.elements_per_page
+        max_pages: int = (tenders_count // elements_per_page) + 1
+        max_lines_on_last_page: int = (tenders_count % elements_per_page) + 1
+
+        if max_lines_on_last_page == 1:
+            max_pages -= 1
+            max_lines_on_last_page = None
+
+        pages_markdown: list[str] = []
+
+        ## Main Instruction Process - Playwright Loop
+        browser = None
+        async with async_playwright() as p:
+            try:
+                browser = await p.chromium.launch(headless = self.headless_mode)
+                page = await browser.new_page()
+
+                ## Prevents unuseful resources from loading to speed up the loading process
+                await page.route(
+                    "**/*.{png,jpg,jpeg,gif,svg,woff,woff2,ttf}",
+                    lambda route: route.abort()
+                )
+
+                try:
+                    ## Main Page
+                    await page.goto(
+                        search_url,
+                        wait_until = "networkidle", ## Waits for the Network traffic to become stable
+                        timeout = self.timeout_ms
+                    )
+                    
+                    for page_num in range(max_pages):
+                        log.info(f"[TendersOverviewExtraction] [{portal_name}] Page {page_num}/{max_pages}")
+
+                        ## Useful for Filtering or Tag Selection
+                        if page_num == 0:
+                            await self._do_apply_action_on_first_page(
+                                page = page, portal_cfg = portal_cfg
+                            )
+                        
+                        ## List Wrapper - Current Content
+                        html = await self._do_get_list_html_content(
+                            page = page, portal_cfg = portal_cfg
+                        )
+                        if not html:
+                            log.warning(f"[TendersOverviewExtraction] Empty content on page {page_num}, stopping")
+                            break
+
+                        ## Markdown Conversion
+                        markdown = html_to_markdown(
+                            html,
+                            mode = 'discovery',
+                            max_lines = max_lines_on_last_page if page_num == max_pages - 1 else None
+                        )
+
+                        if markdown.strip():
+                            pages_markdown.append(f"<!-- Page {page_num} -->\n{markdown}")
+                            log.info(f"[TendersOverviewExtraction] Page {page_num} converted successfully. ({len(markdown)} chars).")
+                            
+                        
+                        ## Go to nex Page
+                        has_next = await self._do_go_to_next_page(
+                            page = page, portal_cfg = portal_cfg
+                        )
+
+                        if not has_next:
+                            log.info(f"[TendersOverviewExtraction] No next page after page {page_num}, stopping")
+                            break
+
+                except PlaywrightTimeout:
+                    log.warning(f"[TendersOverviewExtraction] Timeout on {portal_name}, Partial Recovery of the page.")
+
+                    ## We can try and get all the Content that was already loaded in the page.
+                    html = await page.content()
+                    if not html:
+                        return self._error(portal_name, "Timeout exceeded, empty page.")
+                    
+                    
+                    ## Markdown Extraction
+                    markdown = html_to_markdown(html, mode = 'discovery', max_chars = self.max_chars)
+
+                    if not markdown.strip():
+                        return self._error(portal_name, "Page loaded successfully, no content found after stripping [Markdown production].")
+
+                    log.info(f"[TendersOverviewExtraction] Extracted {len(markdown)} chars from {portal_name}")
+                    
+                    return markdown
+
+            except Exception as e:
+                log.error(f"[TendersOverviewExtraction] Unexpected Error on {portal_name}: {e}")
+                return self._error(portal_name, str(e))
+
+            finally:
+                if browser:
+                    await browser.close()
+
+        if not pages_markdown:
+            return self._error(portal_name, "No content collected across all pages")
+
+        header = (
+            f"# Tender listings from {portal_name}\n"
+            f"Pages navigated: {len(pages_markdown)}\n\n"
+        )
+        return header + "\n\n---\n\n".join(pages_markdown)
+
+
+    ## Support Methods
+    def _build_locator(self, selector: SelectorIdentifier) -> str:
+        """
+        Builds a Playwright locator string from a selector config.
+        """
+        match selector.type:
+            case "css":
+                return selector.text
+            # case "aria-label":
+            #     return f"[aria-label='{cfg['selector_text']}']"
+
+            case _: ## In general [type='content']
+                return f"[{selector.type}='{selector.text}']"
+
+    async def _do_apply_action_on_first_page(self, page, portal_cfg: DiscoveryProcess) -> None:
+        """
+        Applies actions/filter on the main table for the first page.
+        Useful for sorting based on Values using dynamic lists, etc.
+        """
+        ## Apply actions like sorting based on Values using dynamic lists etc.
+        for action in (portal_cfg.actions_to_perform or []):
+            
+            locator_str: str = self._build_locator(action.selector)
+            log.info(f"[TendersOverviewExtraction] Applying action \"{action.action_type}\" on element: {locator_str}")
+                       
+            match action.action_type:
+                case "click":
+                    await page.locator(locator_str).click()
+
+                    wait = action.wait_after_action or "networkidle"
+                    if isinstance(wait, int):
+                        await page.wait_for_timeout(wait)
+                    else:
+                        await page.wait_for_load_state(wait)
+
+    async def _do_get_list_html_content(self, page, portal_cfg: DiscoveryProcess) -> Optional[str]:
+        """
+        Extracts HTML from the configured list wrapper element.
+        """
+        wrapper_cfg = portal_cfg.list_wrapper_selector
+
+        # No wrapper configured — fallback to full page
+        if not wrapper_cfg:
+            return await page.content()
+
+        locator_str = self._build_locator(wrapper_cfg)
+        try:
+            return await page.locator(locator_str).first.inner_html(timeout=5000)
+        
+        except Exception as e:
+            log.warning(f"[TendersOverviewExtraction] List wrapper '{locator_str}' not found: {e}, falling back to full page")
+            return await page.content()   
+
+    async def _do_go_to_next_page(self, page, portal_cfg: DiscoveryProcess) -> bool:
+        """
+        Clicks the next page button if available and not disabled.
+        Returns True if navigation occurred, False otherwise.
+        """
+        next_cfg = portal_cfg.next_page_selector
+        if not next_cfg:
+            return False
+
+        locator_str = self._build_locator(next_cfg)
+        next_btn = page.locator(locator_str).first
+
+        if await next_btn.count() == 0:
+            return False
+
+        is_disabled = await next_btn.get_attribute("disabled")
+        if is_disabled is not None:
+            return False
+
+        await next_btn.click()
+
+        ## Waiting for JS to render properly
+        await page.wait_for_load_state("networkidle")
+
+        return True               
+
+
+    def _error(self, portal_name: str, error_message: str) -> str:
+        """
+        Returns an error message that an Agent can parse.
+        """
+        return f"[ERROR on TendersOverviewExtraction] Portal: {portal_name} | Reason: {error_message}"
+
