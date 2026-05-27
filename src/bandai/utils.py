@@ -148,7 +148,7 @@ NO_GO_KEYWORDS: list[str] = [
 def is_implicit_no_go(text: str) -> bool:
     """Fast keyword check for abandonment language (pre-LLM, zero cost)."""
     lower = text.lower()
-    return any(kw in lower for kw in NO_GO_KEYWORDS)
+    return any(re.search(rf"(?<!\w){re.escape(kw)}(?!\w)", lower) for kw in NO_GO_KEYWORDS)
 
 
 ### -----------------------------------------------------------------------------------
