@@ -74,7 +74,9 @@ _JSON_ARRAY_WRAPPER_KEYS = ("tenders", "items", "root", "contracts", "results", 
 
 def _extract_array_from_wrapper(value: Any) -> list | None:
     if isinstance(value, list):
-        return value
+        if not value or all(isinstance(item, dict) for item in value):
+            return value
+        return None
 
     if isinstance(value, dict):
         for key in _JSON_ARRAY_WRAPPER_KEYS:
