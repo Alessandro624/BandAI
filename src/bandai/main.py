@@ -10,6 +10,7 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 from bandai.config import validate_config, get_active_provider, validate_portals
 from bandai.flow import BandAIFlow, BandAIState
+from bandai.io import OUTPUT_DIR, load_contract_from_outputs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,21 +71,6 @@ def _startup_validation() -> None:
     log.info("Provider: %s (%s)", provider.name, provider.description)
 
 
-def _build_stub_contract(contract_id: str) -> dict:
-    """Build a stub contract dict matching the ResolvedContract schema."""
-    return {
-        "canonical_contract_id": contract_id,
-        "title": f"Contratto {contract_id} (manuale)",
-        "contracting_authority": "Da capitolato",
-        "deadline": "Da capitolato",
-        "value_eur": 0,
-        "cpv_codes": [],
-        "canonical_url": f"https://www.anticorruzione.it/contract/{contract_id}",
-        "sources": ["manual"],
-        "consensus_score": 1.0,
-    }
-
-
 def run() -> None:
     """Run the BandAI procurement pipeline via CrewAI Flow."""
     args = _parse_args()
@@ -107,7 +93,15 @@ def run() -> None:
         state = BandAIState(mode=args.mode)
 
         if args.mode == "propose":
-            state.contracts = [_build_stub_contract(args.contract)]
+            contract = load_contract_from_outputs(args.contract)
+            if contract is None:
+                log.error(
+                    "Contract %s not found in %s. Run `bandai --mode scout` or `bandai --mode full` first.",
+                    args.contract,
+                    OUTPUT_DIR,
+                )
+                sys.exit(1)
+            state.contracts = [contract]
 
         flow = BandAIFlow()
         flow.kickoff(inputs=state.model_dump())
