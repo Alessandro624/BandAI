@@ -43,6 +43,21 @@ class TestExtractJsonArray:
         result = extract_json_array("[]")
         assert result == []
 
+    def test_array_with_nested_cpv_array(self) -> None:
+        raw = 'Final answer:\n[{"id": 1, "cpv_codes": ["72000000", "72212517"]}]'
+        result = extract_json_array(raw)
+        assert result == [{"id": 1, "cpv_codes": ["72000000", "72212517"]}]
+
+    def test_known_wrapper_object_extracts_array(self) -> None:
+        raw = '{"tenders": [{"id": 1}], "portal": "TED", "status": "success"}'
+        result = extract_json_array(raw)
+        assert result == [{"id": 1}]
+
+    def test_ignores_nested_scalar_arrays(self) -> None:
+        raw = 'Reasoning with a nested CPV only: {"cpv": ["66516400"]}'
+        with pytest.raises(ValueError, match="No JSON array"):
+            extract_json_array(raw)
+
 
 class TestIsImplicitNoGo:
     """Tests for is_implicit_no_go()."""
@@ -59,6 +74,8 @@ class TestIsImplicitNoGo:
     def test_positive_intent(self) -> None:
         assert not is_implicit_no_go("We have all certifications")
         assert not is_implicit_no_go("Posiamo procedere con la documentazione")
+        assert not is_implicit_no_go("Confermiamo di possedere tutti i requisiti vincolanti")
+        assert not is_implicit_no_go("Abbiamo formalizzato e sottoscritto un contratto di avvalimento")
 
     def test_empty_string(self) -> None:
         assert not is_implicit_no_go("")
@@ -93,6 +110,17 @@ class TestContractToSummary:
         summary = contract_to_summary(c)
         assert "Minimal" in summary
         assert "N/A" in summary
+
+    def test_none_value_and_cpv_codes(self) -> None:
+        c = {
+            "title": "Nullable Tender",
+            "value_eur": None,
+            "cpv_codes": None,
+        }
+        summary = contract_to_summary(c)
+        assert "Nullable Tender" in summary
+        assert "EUR 0" in summary
+        assert "CPV" in summary
 
 
 class TestLoadYamlConfig:
