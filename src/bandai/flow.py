@@ -4,15 +4,15 @@ import logging
 from datetime import datetime
 from typing import Callable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 from crewai.flow.flow import Flow, listen, router, start  # type: ignore
 
 from bandai.crews.compliance_crew import ComplianceCrew
 from bandai.crews.proposal_crew import ProposalCrew
 from bandai.crews.scout_crew import ScoutCrew
-from bandai.models import ComplianceVerdict, FinalProposal
+from bandai.models import ComplianceVerdict, FinalProposal, ResolvedContract
 from bandai.config import _MAX_REVIEW_ITERATIONS
-from bandai.utils import contract_to_summary, is_implicit_no_go
+from bandai.utils import contract_to_summary, extract_json_array, is_implicit_no_go
 from bandai.io import save_json
 
 log = logging.getLogger("bandai.flow")
@@ -122,10 +122,12 @@ class BandAIFlow(Flow[BandAIState]):
             )
             built_crew.kickoff()
 
-            # Use CrewAI structured output instead of manual JSON parsing.
             raw = final_task.output.raw
+            log.info("Raw scout output:\n%s", raw)
             try:
-                contracts = [c if isinstance(c, dict) else c.model_dump() for c in (final_task.output.pydantic or [])]
+                parsed = extract_json_array(raw)
+                resolved = TypeAdapter(list[ResolvedContract]).validate_python(parsed)
+                contracts = [contract.model_dump() for contract in resolved]
             except Exception:
                 log.error("Scout output was not parseable. Raw:\n%s", raw)
                 contracts = []
