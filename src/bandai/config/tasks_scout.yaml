@@ -17,42 +17,42 @@ crawl_task:
     set to null rather than omitted. No extra text before or after the array.
   agent: crawler_agent
 
-resolution_task:
-  description: >
-    You have received the tender lists from all Crawler agents (in context).
-    Perform the following steps:
+# resolution_task:
+#   description: >
+#     You have received the tender lists from all Crawler agents (in context).
+#     Perform the following steps:
 
-    1. DEDUPLICATION
-       Group entries with the same Contract ID.
-       If Contract ID is absent, group by (contracting_authority + value_eur ± 5%).
+#     1. DEDUPLICATION
+#        Group entries with the same Contract ID.
+#        If Contract ID is absent, group by (contracting_authority + value_eur ± 5%).
 
-    2. CONSENSUS POLLING
-       Apply the fixed portal reliability weights below - do NOT alter them:
-    {portal_weight_table}
+#     2. CONSENSUS POLLING
+#        Apply the fixed portal reliability weights below - do NOT alter them:
+#     {portal_weight_table}
 
-       For each duplicate group:
-       - Select the canonical record from the highest-weight portal.
-       - On a tie, prefer the entry with the most non-null fields.
-       - consensus_score = (winning_portal_weight) x
-         (portals_that_listed_this / total_portals_crawled)
+#        For each duplicate group:
+#        - Select the canonical record from the highest-weight portal.
+#        - On a tie, prefer the entry with the most non-null fields.
+#        - consensus_score = (winning_portal_weight) x
+#          (portals_that_listed_this / total_portals_crawled)
 
-    3. OUTPUT
-       Return a JSON array of ResolvedContract objects sorted by
-       value_eur descending (biggest opportunity first).
-       Required fields: canonical_contract_id, title, contracting_authority,
-       deadline, value_eur, cpv_codes, sources, consensus_score, canonical_url.
+#     3. OUTPUT
+#        Return a JSON array of ResolvedContract objects sorted by
+#        value_eur descending (biggest opportunity first).
+#        Required fields: canonical_contract_id, title, contracting_authority,
+#        deadline, value_eur, cpv_codes, sources, consensus_score, canonical_url.
 
-    4. OUTPUT RULES (mandatory):
-       Return ONLY the raw JSON array. No introductory text, no explanation,
-       no markdown fences. The response must start with '[' and end with ']'.
-       value_eur must be a number (float), never a string with currency symbols.
-       canonical_url must be a string; use "" if unknown, never null.
-  expected_output: >
-    A JSON array of ResolvedContract objects, deduplicated and ranked by
-    value_eur descending.
-    A raw JSON array starting with '[' and ending with ']'.
-    No text before or after the array.
-  agent: resolution_agent
+#     4. OUTPUT RULES (mandatory):
+#        Return ONLY the raw JSON array. No introductory text, no explanation,
+#        no markdown fences. The response must start with '[' and end with ']'.
+#        value_eur must be a number (float), never a string with currency symbols.
+#        canonical_url must be a string; use "" if unknown, never null.
+#   expected_output: >
+#     A JSON array of ResolvedContract objects, deduplicated and ranked by
+#     value_eur descending.
+#     A raw JSON array starting with '[' and ending with ']'.
+#     No text before or after the array.
+#   agent: resolution_agent
 
 preference_filter_task:
   description: >
@@ -129,26 +129,29 @@ extraction_task:
   description: >
     You are given a list of {tenders_count} tenders from the {portal_name} portal.
     For each of the tenders in the list you must:
+
     1. Load the tender detail page at its URL.
+    
     2. Extract all available information from the page and build a TenderInfo object.
-    Fields to extract:
-    - cig: Codice Identificativo Gara
-    - cup: Codice Unico di Progetto
-    - title: full tender title
-    - url: the page URL
-    - cpv: list of CPV codes
-    - contract_type: i.e Services / Supplies / Works
-    - contracting_authority: name and tax_code
-    - base_amount: base auction amount in euros
-    - max_amount: maximum value including renewals
-    - publication_date: ISO format (YYYY-MM-DD)
-    - deadline: bid submission deadline, ISO format
-    - contract_duration_months: integer
-    - url_docs: list of links to documents and attachments
+    
+      Fields to extract:
+      - cig: Codice Identificativo Gara
+      - cup: Codice Unico di Progetto
+      - title: full tender title
+      - url: the page URL
+      - cpv: list of CPV codes
+      - contract_type: i.e Services / Supplies / Works
+      - contracting_authority: name and tax_code
+      - base_amount: base auction amount in euros
+      - max_amount: maximum value including renewals
+      - publication_date: ISO format (YYYY-MM-DD)
+      - deadline: bid submission deadline, ISO format
+      - contract_duration_months: integer
+      - url_docs: list of links to documents and attachments
 
     3. After processing ALL {tenders_count} tenders, collect
-    every TenderInfo into a single JSON array and return it as
-    your final answer. Do not return partial results mid-loop.
+       every TenderInfo into a single JSON array and return it as
+       your final answer. Do not return partial results mid-loop.
 
     Rules:
     - Set missing fields to null, never guess
@@ -182,3 +185,61 @@ extraction_task:
     ]
   agent: extraction_agent
 
+resolution_task:
+  description: >
+    You are given {portals_count} list of {tenders_count} tenders each.
+    Your job is to do the following:
+
+    1. DEDUPLICATION
+       Group entries with the same Contract ID.
+       If Contract ID is absent, group by (Contracting Authority + Tender Amount ± 5%).
+
+    2. CONSENSUS POLLING
+       Apply the fixed portal reliability weights below - do NOT alter them:
+    {portal_weight_table}
+
+       For each group of duplicates, select a SINGLE RECORD from the highest-weight portal.
+       On a tie, prefer the entry with the most non-null fields.
+       The Consensus Score is computed (winning_portal_weight) x
+         (portals_that_listed_this / total_portals_crawled)
+
+    3. After processing ALL the tenders, collect every Tender into a single 
+       JSON array, SORTED by the Tender Amount in DESCENDING order.
+       If the amount is null, treat it as 0 but leave null as value.
+       Then, return it as your final answer. Do not return partial results mid-loop.
+
+    REQUIRED Fields:
+    - canonical_contract_id: Codice Identificativo Gara (CIG)
+    - title: full tender title
+    - contracting_authority: Name of Contracting Authority [tax code if given]
+    - deadline: bid submission deadline, ISO format
+    - value_eur: auction amount in euros (float)
+    - cpv_codes: list of CPV codes
+    - sources: list of Portal where the tender was present
+    - consensus_score: Consensus Score, 
+    - canonical_url: url of the Tender Page
+
+    Rules:
+    - Set missing fields to null, never guess
+
+    IMPORTANT: Your final answer must be ONLY the raw JSON array.
+    Do not write explanations, do not use markdown code blocks,
+    do not add any text before or after the JSON.
+
+    {current_date}
+  expected_output: >
+    A valid array of objects following the ResolvedContract schema:
+    [
+      {
+        "canonical_contract_id": "string or null",
+        "title": "string",
+        "contracting_authority": "string or null",
+        "deadline": "YYYY-MM-DDTHH:MM:SS or null",
+        "value_eur": float or null,
+        "sources" ["TED", "ANAC", ...],
+        "consensus_score": float
+        "cpv_codes": ["code1", "code2"] or null,
+        "canonical_url": "https://..."
+      }
+    ]
+  agent: resolution_agent
