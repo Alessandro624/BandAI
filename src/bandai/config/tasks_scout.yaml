@@ -109,31 +109,28 @@ discovery_task:
     - Do not guess missing fields, use null
     - Return exactly the JSON schema as specified
 
-    IMPORTANT: Your final answer must be ONLY the raw JSON object.
+    IMPORTANT: Your final answer must be ONLY the raw JSON array.
     Do not write explanations, do not use markdown code blocks,
     do not add any text before or after the JSON.
   expected_output: >
-    A valid object following the DiscoveryResult schema:
-    {
-      "tenders": [
-        {
-          "title": "string or null",
-          "url": "https://...",
-          "portal": "{portal_name}",
-          "access_mode": "html",
-          "metadata": {}
-        }
-      ],
-      "portal": "{portal_name}",
-      "status": "success"
-    }
+    A valid object following the TenderOverview schema:
+    [
+      {
+        "title": "string or null",
+        "url": "https://...",
+        "portal": "string",
+        "access_mode": "html",
+        "metadata": {}
+      }
+    ]
   agent: discovery_agent
 
 extraction_task:
   description: >
-    Load the tender detail page at: [{portal_name}] {given_url}.
-    Known title: {title}.
-    Extract all available information from the page and build a TenderInfo object.
+    You are given a list of {tenders_count} tenders from the {portal_name} portal.
+    For each of the tenders in the list you must:
+    1. Load the tender detail page at its URL.
+    2. Extract all available information from the page and build a TenderInfo object.
     Fields to extract:
     - cig: Codice Identificativo Gara
     - cup: Codice Unico di Progetto
@@ -149,33 +146,39 @@ extraction_task:
     - contract_duration_months: integer
     - url_docs: list of links to documents and attachments
 
+    3. After processing ALL {tenders_count} tenders, collect
+    every TenderInfo into a single JSON array and return it as
+    your final answer. Do not return partial results mid-loop.
+
     Rules:
     - Set missing fields to null, never guess
     - Preserve all document links found on the page
     - Return status 'partial' if less than half the fields are populated
 
-    IMPORTANT: Your final answer must be ONLY the raw JSON object.
+    IMPORTANT: Your final answer must be ONLY the raw JSON array.
     Do not write explanations, do not use markdown code blocks,
     do not add any text before or after the JSON.
   expected_output: >
-    A valid object following the DiscoveryResult schema:
-    {
-      "cig": "string or null",
-      "cup": "string or null",
-      "title": "string",
-      "url": "https://...",
-      "cpv": ["code1", "code2"] or null,
-      "contract_type": "string or null",
-      "contracting_authority": {"name": "string or null", "tax_code": "string or null"} or null,
-      "base_amount": float or null,
-      "max_amount": float or null,
-      "publication_date": "YYYY-MM-DD or null",
-      "deadline": "YYYY-MM-DDTHH:MM:SS or null",
-      "contract_duration_months": integer or null,
-      "url_docs": ["https://..."] or null,
-      "portal": "string",
-      "status": "success" or "partial" or "error",
-      "error": null
-    }
+    A valid array of objects following the TenderInfo schema:
+    [
+      {
+        "cig": "string or null",
+        "cup": "string or null",
+        "title": "string",
+        "url": "https://...",
+        "cpv": ["code1", "code2"] or null,
+        "contract_type": "string or null",
+        "contracting_authority": {"name": "string or null", "tax_code": "string or null"} or null,
+        "base_amount": float or null,
+        "max_amount": float or null,
+        "publication_date": "YYYY-MM-DD or null",
+        "deadline": "YYYY-MM-DDTHH:MM:SS or null",
+        "contract_duration_months": integer or null,
+        "url_docs": ["https://..."] or null,
+        "portal": "string",
+        "status": "success" or "partial" or "error",
+        "error": null
+      }
+    ]
   agent: extraction_agent
 

@@ -48,7 +48,7 @@ discovery_agent:
   goal: >
     Navigate the {portal} Public Procurement Portal to find and collect an overview of
     available tenders. Parse the Markdown returned by the tool and produce
-    ONLY a valid JSON object following the DiscoveryResult schema.
+    ONLY a valid JSON Array following the TenderOverview schema.
     Do not add any explanation, preamble, or markdown formatting.
   backstory: >
     You are an expert in Italian and European public procurement.
@@ -62,10 +62,11 @@ extraction_agent:
   role: >
     Public Tender Data Extraction Specialist
   goal: >
-    Given some basic tender information and its URL, load the detail
-    page and parse the Markdown returned by the tool to produce
-    ONLY a valid JSON object following the TenderInfo schema.
-    Do not add any explanation, preamble, or markdown formatting.
+    You will be given a list of tenders from the {portal_name} portal.
+    Process them ONE BY ONE in order. For each tender, call the tool with
+    its URL, parse the Markdown result into a TenderInfo object, then move
+    to the next. Only after ALL tenders are processed, return the complete
+    JSON array. Return ONLY a valid JSON array. No explanation, no markdown.
   backstory: >
     You are an expert in parsing Italian and European public procurement documents.
     You can read complex tender pages and extract key fields like CIG, CPV codes,
