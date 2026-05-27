@@ -16,13 +16,13 @@ from bandai.config import (
 from bandai.guardrails import validate_json_array
 from bandai.knowledge_sources import get_all_knowledge_sources
 from bandai.models import (
-    RawContract, ResolvedContract, 
+    ResolvedContract, 
     load_company_profile
 )
 from bandai.tools.crawler_tools import (
     TendersOverviewExtractorTool, SinglePageLoaderTool,
-    ContractDetailTool, TenderCrawlerTool
-    )
+    ContractDetailTool
+)
 from bandai.utils import load_yaml_config
 
 log = logging.getLogger(__name__)
