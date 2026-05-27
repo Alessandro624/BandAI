@@ -139,6 +139,11 @@ def run_pytest() -> None:
     _run_command(["pytest", "tests/", "-v", *sys.argv[1:]])
 
 
+def install_chromium() -> None:
+    """Install the Chromium browser required by Playwright crawler tools."""
+    _run_command([sys.executable, "-m", "playwright", "install", "chromium"])
+
+
 def run_with_trigger() -> None:
     """Run the BandAI pipeline from an external trigger (webhook/API)."""
     run()

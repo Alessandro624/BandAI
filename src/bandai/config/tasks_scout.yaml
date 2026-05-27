@@ -42,17 +42,30 @@ crawl_task:
 #        Required fields: canonical_contract_id, title, contracting_authority,
 #        deadline, value_eur, cpv_codes, sources, consensus_score, canonical_url.
 
-#     4. OUTPUT RULES (mandatory):
-#        Return ONLY the raw JSON array. No introductory text, no explanation,
-#        no markdown fences. The response must start with '[' and end with ']'.
-#        value_eur must be a number (float), never a string with currency symbols.
-#        canonical_url must be a string; use "" if unknown, never null.
-#   expected_output: >
-#     A JSON array of ResolvedContract objects, deduplicated and ranked by
-#     value_eur descending.
-#     A raw JSON array starting with '[' and ending with ']'.
-#     No text before or after the array.
-#   agent: resolution_agent
+      #  The context records are TenderInfo objects. Map them to ResolvedContract
+      #  exactly as follows:
+      #  - canonical_contract_id: use cig; if absent use cup; if absent use url.
+      #  - title: copy title; if absent use "Unknown tender".
+      #  - contracting_authority: use contracting_authority.name; if absent use "Unknown authority".
+      #  - deadline: copy deadline; if absent use "Unknown deadline".
+      #  - value_eur: use max_amount; if absent use base_amount; if absent use null.
+      #  - cpv_codes: use cpv; if absent use an empty array [].
+      #  - sources: include portal and canonical url when available; never return [].
+      #  - consensus_score: use the winning portal reliability weight from the table.
+      #  - canonical_url: copy url; if absent use "".
+
+    4. OUTPUT RULES (mandatory):
+       Return ONLY the raw JSON array. No introductory text, no explanation,
+       no markdown fences. The response must start with '[' and end with ']'.
+       value_eur must be a number (float), never a string with currency symbols.
+       canonical_url must be a string; use "" if unknown, never null.
+       Do not return null for any field except value_eur.
+  expected_output: >
+    A JSON array of ResolvedContract objects, deduplicated and ranked by
+    value_eur descending.
+    A raw JSON array starting with '[' and ending with ']'.
+    No text before or after the array.
+  agent: resolution_agent
 
 preference_filter_task:
   description: >
@@ -82,6 +95,7 @@ preference_filter_task:
       no markdown fences. The response must start with '[' and end with ']'.
       value_eur must be a number (float), never a string with currency symbols.
       canonical_url must be a string; use "" if unknown, never null.
+      Do not return null for any field except value_eur.
   expected_output: >
     A filtered, ranked JSON array of ResolvedContract objects with fit_reason
     added to each entry.
@@ -89,22 +103,20 @@ preference_filter_task:
     No text before or after the array.
   agent: preference_filter_agent
 
-
-
 discovery_task:
   description: >
     Search the {portal_name} portal for public tenders aimed at Italian
     public administrations. The TendersOverviewExtractorTool will return
     a Markdown containing a list of tenders. Parse the Markdown and extract
     each tender you find. Collect exactly {tenders_count} tender overviews.
-    
+
     For each tender found, parse the information of the following fields:
     - title: tender title if available, null otherwise
     - url: direct URL to the tender detail page (required)
     - portal: always '{portal_name}'
     - access_mode: 'html' for web pages, 'api' for API endpoints
     - metadata: any additional data available (deadline, CIG)
-    
+
     Rules:
     - Do not guess missing fields, use null
     - Return exactly the JSON schema as specified
@@ -112,6 +124,9 @@ discovery_task:
     IMPORTANT: Your final answer must be ONLY the raw JSON array.
     Do not write explanations, do not use markdown code blocks,
     do not add any text before or after the JSON.
+    Do NOT return tool-call JSON.
+    Do NOT return the Markdown you loaded. Convert the Markdown content into
+    TenderOverview objects and return only the JSON array.
   expected_output: >
     A valid object following the TenderOverview schema:
     [
@@ -161,6 +176,12 @@ extraction_task:
     IMPORTANT: Your final answer must be ONLY the raw JSON array.
     Do not write explanations, do not use markdown code blocks,
     do not add any text before or after the JSON.
+    Do NOT return tool-call JSON.
+    Do NOT narrate your extraction process.
+    Do NOT write phrases like "we need to extract" or "let's start".
+    Do NOT return the Markdown you loaded. Convert the Markdown content into
+    TenderInfo objects and return only the JSON array.
+    Your final answer must start with '[' and end with ']'.
   expected_output: >
     A valid array of objects following the TenderInfo schema:
     [
