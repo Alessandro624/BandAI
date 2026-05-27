@@ -15,6 +15,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "ollama>=0.6.2",
     "playwright>=1.60.0",
+    "markdownify>=1.2.2",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +24,7 @@ dev = ["pytest>=8.0.0", "pytest-cov>=5.0.0"]
 [project.scripts]
 bandai = "bandai.main:run"
 run_crew = "bandai.main:run"
+install_chromium = "bandai.main:install_chromium"
 train = "bandai.main:train"
 replay = "bandai.main:replay"
 test = "bandai.main:test"
