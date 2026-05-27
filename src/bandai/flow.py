@@ -25,6 +25,7 @@ def _normalize_resolved_contract_dict(contract: dict) -> dict:
         normalized["contracting_authority"] = authority.get("name") or "Unknown authority"
     return normalized
 
+
 # Human Input Callback
 
 HumanInputFn = Callable[
@@ -131,12 +132,9 @@ class BandAIFlow(Flow[BandAIState]):
             built_crew.kickoff()
 
             raw = final_task.output.raw
-            log.info("Raw scout output:\n%s", raw)
+            log.debug("Raw scout output:\n%s", raw)
             try:
-                parsed = [
-                    _normalize_resolved_contract_dict(contract)
-                    for contract in extract_json_array(raw)
-                ]
+                parsed = [_normalize_resolved_contract_dict(contract) for contract in extract_json_array(raw)]
                 resolved = TypeAdapter(list[ResolvedContract]).validate_python(parsed)
                 contracts = [contract.model_dump() for contract in resolved]
             except Exception:
