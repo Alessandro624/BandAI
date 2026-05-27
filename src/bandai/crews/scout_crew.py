@@ -15,8 +15,14 @@ from bandai.config import (
 )
 from bandai.guardrails import validate_json_array
 from bandai.knowledge_sources import get_all_knowledge_sources
-from bandai.models import RawContract, ResolvedContract, load_company_profile
-from bandai.tools.crawler_tools import ContractDetailTool, TenderCrawlerTool
+from bandai.models import (
+    RawContract, ResolvedContract, 
+    load_company_profile
+)
+from bandai.tools.crawler_tools import (
+    TendersOverviewExtractorTool, SinglePageLoaderTool,
+    ContractDetailTool, TenderCrawlerTool
+    )
 from bandai.utils import load_yaml_config
 
 log = logging.getLogger(__name__)
@@ -41,55 +47,90 @@ class ScoutCrew:
     agents: list[BaseAgent]
     tasks: list[Task]
 
+    tenders_count_per_portal: int = 3
+
     def build(self, user_preferences: str) -> tuple[Crew, Task]:
         """Build and return (crew_instance, preference_filter_task)."""
         ac = load_yaml_config("agents_scout.yaml")
         tc = load_yaml_config("tasks_scout.yaml")
 
         # Load company profile once (cached by @lru_cache).
-        company = load_company_profile()
-        ateco_codes_str = ", ".join(company.ateco_codes)
+        # company = load_company_profile()
+        # ateco_codes_str = ", ".join(company.ateco_codes)
 
-        # Crawler agents + tasks (one per portal, all async)
-        crawler_agents: list[Agent] = []
-        crawl_tasks: list[Task] = []
+        # Crawler agents + tasks 
+        # For each portal: Discovery + Extraction (all async)
+        disc_agents: list[Agent] = []
+        disc_tasks: list[Task] = []
+
+        extr_agents: list[Agent] = []
+        extr_tasks: list[Task] = []
 
         for portal in BANDI_PORTALS:
-            agent_cfg = ac["crawler_agent"]
-            task_cfg = tc["crawl_task"]
+            disc_agent_cfg = ac["discovery_agent"]
+            disc_task_cfg = tc["discovery_task"]
 
-            ag = Agent(
-                role=agent_cfg["role"].format(portal_name=portal.name),
-                goal=agent_cfg["goal"].format(
-                    portal_name=portal.name,
-                    portal_url=portal.base_url,
-                ),
-                backstory=agent_cfg["backstory"].format(portal_name=portal.name),
-                tools=[TenderCrawlerTool(), ContractDetailTool()],
-                llm=get_llm(fast=True),
-                verbose=True,
-                max_iter=5,
-                max_retry_limit=2,
-                respect_context_window=True,
-                allow_delegation=False,
+            disc_ag = Agent(
+                role = disc_agent_cfg["role"],
+                goal = disc_agent_cfg["goal"].format(portal = portal.name),
+                backstory = disc_agent_cfg["backstory"],
+                tools = [TendersOverviewExtractorTool()],
+                llm = get_llm(fast = True),
+                verbose = True,
+                max_iter = 5,
+                max_retry_limit = 2,
+                respect_context_window = True,
+                allow_delegation = False,
             )
 
-            t = Task(
-                description=task_cfg["description"].format(
-                    portal_name=portal.name,
-                    portal_url=portal.base_url,
-                    ateco_codes=ateco_codes_str,
+            disc_t = Task(
+                description = disc_task_cfg["description"].format(
+                    portal_name = portal.name,
+                    tenders_count = self.tenders_count_per_portal,
                 ),
-                expected_output=task_cfg["expected_output"],
-                agent=ag,
-                async_execution=True,
-                output_pydantic=list[RawContract],
-                guardrail=lambda r: validate_json_array(r, strip_fences=True),
-                guardrail_max_retries=3,
+                expected_output = disc_task_cfg["expected_output"],
+                agent = disc_ag,
+                async_execution = True,
+                # output_pydantic = list[TenderOverview],
+                guardrail = lambda r: validate_json_array(r, strip_fences=True),
+                guardrail_max_retries = 3,
             )
 
-            crawler_agents.append(ag)
-            crawl_tasks.append(t)
+            disc_agents.append(disc_ag)
+            disc_tasks.append(disc_t)
+
+            extr_agent_cfg = ac["extraction_agent"]
+            extr_task_cfg = tc["extraction_task"]
+
+            extr_ag = Agent(
+                role = extr_agent_cfg["role"],
+                goal = extr_agent_cfg["goal"].format(portal_name = portal.name),
+                backstory = extr_agent_cfg["backstory"],
+                tools = [SinglePageLoaderTool()],
+                llm = get_llm(fast = True),
+                verbose = True,
+                max_iter = self.tenders_count_per_portal * 2 + 2,
+                max_retry_limit = 2,
+                respect_context_window = True,
+                allow_delegation = False,
+            )
+
+            extr_t = Task(
+                description = extr_task_cfg["description"].format(
+                    portal_name = portal.name,
+                    tenders_count = self.tenders_count_per_portal,
+                ),
+                expected_output = extr_task_cfg["expected_output"],
+                context = [disc_t],
+                agent = extr_ag,
+                async_execution = True,
+                # output_pydantic = list[TenderOverview],
+                guardrail = lambda r: validate_json_array(r, strip_fences=True),
+                guardrail_max_retries = 3,
+            )
+
+            extr_agents.append(extr_ag)
+            extr_tasks.append(extr_t)
 
         # Resolution Agent - deduplicates and ranks results
         res_cfg = ac["resolution_agent"]
@@ -115,7 +156,7 @@ class ScoutCrew:
             ),
             expected_output=res_task_cfg["expected_output"],
             agent=resolution_agent,
-            context=crawl_tasks,
+            context=extr_tasks,
             output_pydantic=list[ResolvedContract],
             guardrail=validate_json_array,
             guardrail_max_retries=3,
@@ -148,8 +189,8 @@ class ScoutCrew:
             guardrail_max_retries=3,
         )
 
-        all_agents = crawler_agents + [resolution_agent, preference_filter_agent]
-        all_tasks = crawl_tasks + [resolution_task, preference_filter_task]
+        all_agents = disc_agents + extr_agents + [resolution_agent, preference_filter_agent]
+        all_tasks = disc_tasks + extr_tasks + [resolution_task, preference_filter_task]
 
         built_crew = Crew(
             agents=all_agents,
