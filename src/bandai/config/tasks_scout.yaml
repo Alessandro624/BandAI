@@ -54,12 +54,12 @@ crawl_task:
       #  - consensus_score: use the winning portal reliability weight from the table.
       #  - canonical_url: copy url; if absent use "".
 
-    4. OUTPUT RULES (mandatory):
-       Return ONLY the raw JSON array. No introductory text, no explanation,
-       no markdown fences. The response must start with '[' and end with ']'.
-       value_eur must be a number (float), never a string with currency symbols.
-       canonical_url must be a string; use "" if unknown, never null.
-       Do not return null for any field except value_eur.
+    # 4. OUTPUT RULES (mandatory):
+    #    Return ONLY the raw JSON array. No introductory text, no explanation,
+    #    no markdown fences. The response must start with '[' and end with ']'.
+    #    value_eur must be a number (float), never a string with currency symbols.
+    #    canonical_url must be a string; use "" if unknown, never null.
+    #    Do not return null for any field except value_eur.
   expected_output: >
     A JSON array of ResolvedContract objects, deduplicated and ranked by
     value_eur descending.
