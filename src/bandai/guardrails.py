@@ -10,6 +10,18 @@ from bandai.utils import extract_json_array_text
 
 log = logging.getLogger(__name__)
 
+_PLACEHOLDER_VALUES = {"string", "code1", "code2", "code3", "code4", "code5", "code6"}
+
+
+def _contains_placeholder(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in _PLACEHOLDER_VALUES
+    if isinstance(value, list):
+        return any(_contains_placeholder(item) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_placeholder(item) for item in value.values())
+    return False
+
 
 # JSON Array Validation
 
@@ -124,10 +136,24 @@ def validate_resolved_contract_array(
 
         if not isinstance(contract.get("cpv_codes"), list):
             return (False, f"Item {index} field cpv_codes must be a list, never null.")
+        if isinstance(contract.get("contracting_authority"), dict):
+            return (
+                False,
+                f"Item {index} field contracting_authority must be a string, not an object. "
+                "Use contracting_authority.name from TenderInfo.",
+            )
+        if not isinstance(contract.get("contracting_authority"), str):
+            return (False, f"Item {index} field contracting_authority must be a string.")
         if not isinstance(contract.get("sources"), list) or not contract["sources"]:
             return (False, f"Item {index} field sources must be a non-empty list.")
         if not isinstance(contract.get("consensus_score"), (int, float)):
             return (False, f"Item {index} field consensus_score must be a number.")
+        if _contains_placeholder(contract):
+            return (
+                False,
+                f"Item {index} contains placeholder/example values such as 'string' or 'code1'. "
+                "Use only real values extracted from TenderInfo context; if unavailable use the configured fallback values.",
+            )
 
     return (True, payload)
 
