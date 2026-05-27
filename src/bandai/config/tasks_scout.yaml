@@ -1,108 +1,3 @@
-crawl_task:
-  description: >
-    Search {portal_name} for public IT/cloud/cybersecurity tenders aimed at
-    Italian public administrations.
-
-    Relevant CPV codes: 72000000, 72212517, 48900000, 72315000. Company ATECO
-    codes: {ateco_codes}. Portal entry URL: {portal_url}
-
-    Return a JSON array of RawContract objects with keys: portal, url, title,
-    contract_id, contracting_authority, deadline, value_eur, cpv_codes, raw_text.
-
-    Use the TenderCrawlerTool to perform the search, then return ONLY the raw
-    JSON array produced by the tool. Do NOT include tool call JSON, markdown
-    fences, explanations, or example placeholders like "...".
-  expected_output: >
-    A JSON array of RawContract dicts. Every field that cannot be found must be
-    set to null rather than omitted. No extra text before or after the array.
-  agent: crawler_agent
-
-# resolution_task:
-#   description: >
-#     You have received the tender lists from all Crawler agents (in context).
-#     Perform the following steps:
-
-#     1. DEDUPLICATION
-#        Group entries with the same Contract ID.
-#        If Contract ID is absent, group by (contracting_authority + value_eur ± 5%).
-
-#     2. CONSENSUS POLLING
-#        Apply the fixed portal reliability weights below - do NOT alter them:
-#     {portal_weight_table}
-
-#        For each duplicate group:
-#        - Select the canonical record from the highest-weight portal.
-#        - On a tie, prefer the entry with the most non-null fields.
-#        - consensus_score = (winning_portal_weight) x
-#          (portals_that_listed_this / total_portals_crawled)
-
-#     3. OUTPUT
-#        Return a JSON array of ResolvedContract objects sorted by
-#        value_eur descending (biggest opportunity first).
-#        Required fields: canonical_contract_id, title, contracting_authority,
-#        deadline, value_eur, cpv_codes, sources, consensus_score, canonical_url.
-
-      #  The context records are TenderInfo objects. Map them to ResolvedContract
-      #  exactly as follows:
-      #  - canonical_contract_id: use cig; if absent use cup; if absent use url.
-      #  - title: copy title; if absent use "Unknown tender".
-      #  - contracting_authority: use contracting_authority.name; if absent use "Unknown authority".
-      #  - deadline: copy deadline; if absent use "Unknown deadline".
-      #  - value_eur: use max_amount; if absent use base_amount; if absent use null.
-      #  - cpv_codes: use cpv; if absent use an empty array [].
-      #  - sources: include portal and canonical url when available; never return [].
-      #  - consensus_score: use the winning portal reliability weight from the table.
-      #  - canonical_url: copy url; if absent use "".
-
-    # 4. OUTPUT RULES (mandatory):
-    #    Return ONLY the raw JSON array. No introductory text, no explanation,
-    #    no markdown fences. The response must start with '[' and end with ']'.
-    #    value_eur must be a number (float), never a string with currency symbols.
-    #    canonical_url must be a string; use "" if unknown, never null.
-    #    Do not return null for any field except value_eur.
-  expected_output: >
-    A JSON array of ResolvedContract objects, deduplicated and ranked by
-    value_eur descending.
-    A raw JSON array starting with '[' and ending with ']'.
-    No text before or after the array.
-  agent: resolution_agent
-
-preference_filter_task:
-  description: >
-    You have the full list of ResolvedContracts from the Resolution Agent (context).
-
-    USER PREFERENCES (natural language):
-    {user_preferences}
-
-    Instructions:
-      1. Filter out contracts that clearly contradict the preferences.
-      2. Re-rank the remaining ones by fit with preferences (not just value_eur).
-      3. For each kept contract add a one-line fit_reason.
-      4. For each removed contract add a one-line removal_reason.
-      5. Return the filtered + ranked JSON array.
-
-    NOTE: the human will review your output before it is finalised.
-    They may add further instructions or corrections in natural language.
-
-    OUTPUT:
-      Return a JSON array of ResolvedContract objects sorted by
-      value_eur descending (biggest opportunity first).
-      Required fields: canonical_contract_id, title, contracting_authority,
-      deadline, value_eur, cpv_codes, sources, consensus_score, canonical_url.
-
-    OUTPUT RULES (mandatory):
-      Return ONLY the raw JSON array. No introductory text, no explanation,
-      no markdown fences. The response must start with '[' and end with ']'.
-      value_eur must be a number (float), never a string with currency symbols.
-      canonical_url must be a string; use "" if unknown, never null.
-      Do not return null for any field except value_eur.
-  expected_output: >
-    A filtered, ranked JSON array of ResolvedContract objects with fit_reason
-    added to each entry.
-    A raw JSON array starting with '[' and ending with ']'.
-    No text before or after the array.
-  agent: preference_filter_agent
-
 discovery_task:
   description: >
     Search the {portal_name} portal for public tenders aimed at Italian
@@ -264,3 +159,39 @@ resolution_task:
       }
     ]
   agent: resolution_agent
+
+preference_filter_task:
+  description: >
+    You have the full list of ResolvedContracts from the Resolution Agent (context).
+
+    USER PREFERENCES (natural language):
+    {user_preferences}
+
+    Instructions:
+      1. Filter out contracts that clearly contradict the preferences.
+      2. Re-rank the remaining ones by fit with preferences (not just value_eur).
+      3. For each kept contract add a one-line fit_reason.
+      4. For each removed contract add a one-line removal_reason.
+      5. Return the filtered + ranked JSON array.
+
+    NOTE: the human will review your output before it is finalised.
+    They may add further instructions or corrections in natural language.
+
+    OUTPUT:
+      Return a JSON array of ResolvedContract objects sorted by
+      value_eur descending (biggest opportunity first).
+      Required fields: canonical_contract_id, title, contracting_authority,
+      deadline, value_eur, cpv_codes, sources, consensus_score, canonical_url.
+
+    OUTPUT RULES (mandatory):
+      Return ONLY the raw JSON array. No introductory text, no explanation,
+      no markdown fences. The response must start with '[' and end with ']'.
+      value_eur must be a number (float), never a string with currency symbols.
+      canonical_url must be a string; use "" if unknown, never null.
+      Do not return null for any field except value_eur.
+  expected_output: >
+    A filtered, ranked JSON array of ResolvedContract objects with fit_reason
+    added to each entry.
+    A raw JSON array starting with '[' and ending with ']'.
+    No text before or after the array.
+  agent: preference_filter_agent
