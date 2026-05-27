@@ -4,14 +4,14 @@ discovery_task:
     public administrations. The TendersOverviewExtractorTool will return
     a Markdown containing a list of tenders. Parse the Markdown and extract
     each tender you find. Collect exactly {tenders_count} tender overviews.
-
+    
     For each tender found, parse the information of the following fields:
     - title: tender title if available, null otherwise
     - url: direct URL to the tender detail page (required)
     - portal: always '{portal_name}'
     - access_mode: 'html' for web pages, 'api' for API endpoints
     - metadata: any additional data available (deadline, CIG)
-
+    
     Rules:
     - Do not guess missing fields, use null
     - Return exactly the JSON schema as specified
@@ -19,9 +19,6 @@ discovery_task:
     IMPORTANT: Your final answer must be ONLY the raw JSON array.
     Do not write explanations, do not use markdown code blocks,
     do not add any text before or after the JSON.
-    Do NOT return tool-call JSON.
-    Do NOT return the Markdown you loaded. Convert the Markdown content into
-    TenderOverview objects and return only the JSON array.
   expected_output: >
     A valid object following the TenderOverview schema:
     [
@@ -71,12 +68,6 @@ extraction_task:
     IMPORTANT: Your final answer must be ONLY the raw JSON array.
     Do not write explanations, do not use markdown code blocks,
     do not add any text before or after the JSON.
-    Do NOT return tool-call JSON.
-    Do NOT narrate your extraction process.
-    Do NOT write phrases like "we need to extract" or "let's start".
-    Do NOT return the Markdown you loaded. Convert the Markdown content into
-    TenderInfo objects and return only the JSON array.
-    Your final answer must start with '[' and end with ']'.
   expected_output: >
     A valid array of objects following the TenderInfo schema:
     [
