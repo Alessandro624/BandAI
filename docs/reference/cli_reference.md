@@ -24,13 +24,13 @@ bandai --mode scout
 
 ### `bandai --mode propose --contract <ID>`
 
-Propose mode for a known contract. Skips scouting, creates a stub contract entry, and runs Compliance → Proposal.
+Propose mode for a known contract. Skips scouting, loads the contract from `output/01_scout_results.json`, and runs Compliance → Proposal.
 
 ```bash
 bandai --mode propose --contract GD-2026-00123
 ```
 
-`--mode propose` requires `--contract`. Without it, exits with an error.
+`--mode propose` requires `--contract`. Without it, or if the contract ID is not present in the previous scout output, exits with an error.
 
 ### `bandai --dry-run`
 

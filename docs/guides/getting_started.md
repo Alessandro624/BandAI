@@ -82,7 +82,7 @@ Discovers tenders and prints results. No compliance or proposal generation.
 bandai --mode propose --contract GD-2026-00123
 ```
 
-Skips scouting. Creates a stub contract with the given ID and runs compliance + proposal phases.
+Skips scouting. Loads the contract with the given ID from `output/01_scout_results.json` and runs compliance + proposal phases.
 
 ### Dry run
 

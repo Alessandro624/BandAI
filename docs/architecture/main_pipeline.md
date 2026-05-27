@@ -16,7 +16,7 @@ Mode is set via `--mode` flag or by calling `BandAIState(mode=...)`.
 
 `main.py` is a thin wrapper. It validates configuration (provider, API key, knowledge file, portals), parses CLI args, prepares the initial `BandAIState`, then delegates to `BandAIFlow.kickoff(inputs=state.model_dump())`.
 
-For `--mode propose`, the wrapper injects a stub contract into the state before kickoff so the flow can start directly from compliance without running scouting.
+For `--mode propose`, the wrapper loads the selected contract from `output/01_scout_results.json` before kickoff so the flow can start directly from compliance without running scouting.
 
 ```text
 main.py  ->  _startup_validation()  ->  BandAIState(...)  ->  BandAIFlow().kickoff(inputs=state.model_dump())

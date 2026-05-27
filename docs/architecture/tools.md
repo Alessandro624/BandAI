@@ -1,63 +1,34 @@
 # Tools
 
-Four custom CrewAI tools, all in `tools/crawler_tools.py`. All extend `BaseTool` and use Pydantic input schemas.
+Runtime CrewAI tools live in `tools/crawler_tools.py`. All extend `BaseTool` and use Pydantic input schemas.
 
-## TenderCrawlerTool
+## TendersOverviewExtractorTool
 
-Crawls a procurement portal for matching tenders.
+Navigates a configured tender listing portal with Playwright and returns list-page content as Markdown for the Discovery Agent to parse into `TenderOverview` objects.
 
-**Input:** `CrawlerInput`
+**Input:** `TendersOverviewExtractorInput`
 
 ```text
-portal_name: str   - Human-readable portal name
-base_url: str      - Portal entry URL
-keywords: list[str] - Search terms (accepts string or JSON array)
-max_results: int   - Limit, default 10
+portal_name: str
+tenders_count: int
 ```
 
-**Output:** JSON array of tender notices with keys: `portal`, `url`, `title`, `contract_id`, `contracting_authority`, `deadline`, `value_euros`, `raw_text`.
-
-**Status:** Stub. Returns mock data with randomized values. The real implementation needs `httpx` + `BeautifulSoup` for portal-specific scraping. The mock is sufficient for end-to-end pipeline testing.
-
-**Used by:** Crawler Agent (Scout crew, one instance per portal).
+**Used by:** Discovery Agent in `ScoutCrew`.
 
 ---
 
-## ContractDetailTool
+## SinglePageLoaderTool
 
-Fetches full metadata for a single tender by Contract ID.
+Loads a single tender detail page with Playwright and returns cleaned Markdown for the Extraction Agent to parse into `TenderInfo` objects.
 
-**Input:** `ContractLookupInput`
-
-```text
-contract_id: str  - Unique tender identifier
-portal_url: str   - Source portal URL
-```
-
-**Output:** JSON with `contract_id`, `source_url`, `completeness_score`, and boolean flags for `has_technical_spec`, `has_admin_clauses`, `has_award_criteria`.
-
-**Status:** Stub. The real implementation should hit the ANAC open data API at `https://dati.anticorruzione.it/opendata/`.
-
-**Used by:** Crawler Agent and Resolution Agent (Scout crew).
-
----
-
-## ComplianceCheckerTool
-
-Cross-references company profile against tender requirements.
-
-**Input:** `ComplianceInput`
+**Input:** `SinglePageLoaderInput`
 
 ```text
-tender_raw_text: str       - Full tender text
-company_profile_json: str  - Company profile as JSON string
+portal_name: str
+url: str
 ```
 
-**Output:** JSON with three lists: `met`, `missing`, `uncertain`.
-
-**Status:** Stub. Returns hardcoded example analysis. The real implementation needs NLP extraction to map tender requirements to company certifications, turnover thresholds, and past contract history.
-
-**Used by:** Advocate and Auditor agents (Compliance crew).
+**Used by:** Extraction Agent in `ScoutCrew`.
 
 ---
 
@@ -68,33 +39,20 @@ Writes a Markdown proposal document to disk.
 **Input:** `DocumentGeneratorInput`
 
 ```text
-title: str              - Document title
-sections: dict[str, str] - Section name -> Markdown content
-output_path: str        - File path, default "output/proposal_output.md"
+title: str
+sections: dict[str, str]
+output_path: str
 ```
 
 **Output:** Confirmation string with the file path, or an error message.
 
-**Behavior:** Creates parent directories automatically (`mkdir(parents=True)`). Overwrites existing files. Writes UTF-8 encoded Markdown.
+**Behavior:** Creates parent directories automatically and writes UTF-8 Markdown.
 
-**Status:** Functional. This is the only tool with a real implementation.
-
-**Used by:** Proposal Architect (Proposal crew).
-
----
-
-## Input Schema Details
-
-All schemas use Pydantic `Field` descriptions for LLM-readable documentation:
-
-- `CrawlerInput` - `keywords` field has a `@field_validator` that accepts either a JSON string or a raw string, converting single values to `["value"]`.
-- `ContractLookupInput` - Straightforward key-value lookup.
-- `DocumentGeneratorInput` - Default output path is `output/proposal_output.md`.
-- `ComplianceInput` - Expects the full company profile as a serialized JSON string, which the agent constructs from knowledge.
+**Used by:** Proposal Architect in `ProposalCrew`.
 
 ## Adding a New Tool
 
 1. Define a Pydantic input schema in `tools/crawler_tools.py`.
 2. Create a class extending `BaseTool` with `name`, `description`, `args_schema`, and `_run()`.
-3. Import and assign to the relevant agent via the `tools=[]` parameter.
-4. Add tests in `tests/test_config.py` or a new `tests/test_tools.py`.
+3. Assign it to the relevant agent only when it provides real runtime behavior.
+4. Add focused tests for the schema and behavior.

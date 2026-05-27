@@ -142,7 +142,7 @@ class RAGSearchTool(BaseTool):
 ```python
 agent = Agent(
     ...,
-    tools=[RAGSearchTool(), ContractDetailTool()],
+    tools=[RAGSearchTool()],
 )
 ```
 

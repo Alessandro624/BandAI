@@ -7,25 +7,27 @@ BandAI has three crews, they all use `memory=get_memory()` for cross-session lea
 **File:** `crews/scout_crew.py`
 **Config:** `config/agents_scout.yaml`, `config/tasks_scout.yaml`
 
-Discovers and deduplicates Italian public tenders across multiple procurement portals. The number of crawler agents is dynamic - one per portal defined in `config/portals.yaml`.
+Discovers and deduplicates Italian public tenders across configured procurement portals. For each portal, Scout builds a discovery agent and an extraction agent.
 
 ### Agents
 
 | Agent | LLM | Tools | Notes |
 | ------------------------ | ------- | -------------------------------- | ------------------------------ |
-| Crawler Agent (×N) | fast | TenderCrawlerTool, ContractDetailTool | One per portal, async |
-| Resolution Agent | main | ContractDetailTool | `inject_date=True` |
+| Discovery Agent (×N) | fast | TendersOverviewExtractorTool | One per portal, async |
+| Extraction Agent (×N) | fast | SinglePageLoaderTool | One per portal, reads discovery context |
+| Resolution Agent | main | - | `inject_date=True` |
 | Preference Filter | main | - | `human_input=True` |
 
 ### Task Chain
 
 ```text
-crawl_task (×N, async) -> resolution_task -> preference_filter_task
+discovery_task (×N, async) -> extraction_task (×N) -> resolution_task -> preference_filter_task
 ```
 
-1. **crawl_task** - Each crawler searches one portal for tenders matching Italian ICT/cloud CPV codes. Returns `RawContract` JSON arrays.
-2. **resolution_task** - Deduplicates across portals using Contract ID matching and +/-5% value tolerance. Applies weighted consensus polling using portal reliability scores. Returns `ResolvedContract` JSON array ranked by `value_eur` descending. Guardrail: output must be a raw JSON array starting with `[`.
-3. **preference_filter_task** - Filters and re-ranks based on user preferences. Adds `fit_reason` to each entry. Guardrail: strips markdown fences, validates JSON array format.
+1. **discovery_task** - Uses Playwright to collect listing-page Markdown and returns `TenderOverview` JSON arrays.
+2. **extraction_task** - Loads tender detail pages and returns `TenderInfo` JSON arrays.
+3. **resolution_task** - Maps `TenderInfo` records to `ResolvedContract`, deduplicates, and applies portal reliability weights. Guardrail rejects null required fields and placeholder values.
+4. **preference_filter_task** - Filters and re-ranks based on user preferences. Adds `fit_reason` to each entry.
 
 ### Build Signature
 
@@ -50,8 +52,8 @@ Runs a structured advocate/auditor debate to produce a bid verdict for a single 
 
 | Agent              | LLM   | Tools                 | Notes                          |
 |--------------------|-------|-----------------------|--------------------------------|
-| Advocate           | main  | ComplianceCheckerTool | Optimistic bid manager         |
-| Auditor            | main  | ComplianceCheckerTool | Former ANAC inspector          |
+| Advocate           | main  | -                     | Optimistic bid manager         |
+| Auditor            | main  | -                     | Former ANAC inspector          |
 | Compliance Officer | main  | -                     | `reasoning=True` for synthesis |
 
 ### Task Chain (Initial)
