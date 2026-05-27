@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import datetime as dt
 
 from crewai import Agent, Crew, Process, Task  # type: ignore
 from crewai.agents.agent_builder.base_agent import BaseAgent  # type: ignore
@@ -51,6 +52,7 @@ class ScoutCrew:
         """Build and return (crew_instance, preference_filter_task)."""
         ac = load_yaml_config("agents_scout.yaml")
         tc = load_yaml_config("tasks_scout.yaml")
+        len_portals = len(BANDI_PORTALS)
 
         # Load company profile once (cached by @lru_cache).
         # company = load_company_profile()
@@ -58,10 +60,9 @@ class ScoutCrew:
 
         # Crawler agents + tasks
         # For each portal: Discovery + Extraction (all async)
-        disc_agents: list[Agent] = []
-        disc_tasks: list[Task] = []
+        all_agents: list[Agent] = []
+        all_tasks: list[Task] = []
 
-        extr_agents: list[Agent] = []
         extr_tasks: list[Task] = []
 
         for portal in BANDI_PORTALS:
@@ -88,14 +89,14 @@ class ScoutCrew:
                 ),
                 expected_output=disc_task_cfg["expected_output"],
                 agent=disc_ag,
-                async_execution=True,
+                # async_execution=True,
                 # output_pydantic = list[TenderOverview],
                 guardrail=lambda r: validate_json_array(r, strip_fences=True),
                 guardrail_max_retries=3,
             )
 
-            disc_agents.append(disc_ag)
-            disc_tasks.append(disc_t)
+            all_agents.append(disc_ag)
+            all_tasks.append(disc_t)
 
             extr_agent_cfg = ac["extraction_agent"]
             extr_task_cfg = tc["extraction_task"]
@@ -127,7 +128,8 @@ class ScoutCrew:
                 guardrail_max_retries=3,
             )
 
-            extr_agents.append(extr_ag)
+            all_agents.append(extr_ag)
+            all_tasks.append(extr_t)
             extr_tasks.append(extr_t)
 
         # Resolution Agent - deduplicates and ranks results
@@ -136,20 +138,23 @@ class ScoutCrew:
 
         resolution_agent = Agent(
             role=res_cfg["role"],
-            goal=res_cfg["goal"],
+            goal=res_cfg["goal"].format(portals_count = len_portals),
             backstory=res_cfg["backstory"],
             llm=get_llm(fast=False),
             verbose=True,
             max_iter=8,
             max_retry_limit=2,
             respect_context_window=True,
-            inject_date=True,  # temporal awareness for deadline handling
+            # inject_date=True,  # temporal awareness for deadline handling
             allow_delegation=False,
         )
 
         resolution_task = Task(
             description=res_task_cfg["description"].format(
                 portal_weight_table=_build_weight_table(),
+                tenders_count = self.tenders_count_per_portal,
+                portal_weight_table=_build_weight_table(),
+                current_date = f"Current Date: { str(dt.datetime.now().date()) }"
             ),
             expected_output=res_task_cfg["expected_output"],
             agent=resolution_agent,
@@ -186,8 +191,8 @@ class ScoutCrew:
             guardrail_max_retries=3,
         )
 
-        all_agents = disc_agents + extr_agents + [resolution_agent, preference_filter_agent]
-        all_tasks = disc_tasks + extr_tasks + [resolution_task, preference_filter_task]
+        all_agents = all_agents + [resolution_agent, preference_filter_agent]
+        all_tasks = all_tasks  + [resolution_task, preference_filter_task]
 
         built_crew = Crew(
             agents=all_agents,
