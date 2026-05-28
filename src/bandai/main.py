@@ -10,6 +10,8 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 from bandai.config import validate_config, get_active_provider, validate_portals
 from bandai.flow import BandAIFlow, BandAIState
+from bandai.io import OUTPUT_DIR, load_contract_from_outputs
+from bandai.report import write_report
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,7 +25,7 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="BandAI - Italian SME Procurement Agent")
     p.add_argument(
         "--mode",
-        choices=["full", "scout", "propose"],
+        choices=["full", "scout", "propose", "report"],
         default="full",
         help="Pipeline mode (default: full)",
     )
@@ -70,24 +72,15 @@ def _startup_validation() -> None:
     log.info("Provider: %s (%s)", provider.name, provider.description)
 
 
-def _build_stub_contract(contract_id: str) -> dict:
-    """Build a stub contract dict matching the ResolvedContract schema."""
-    return {
-        "canonical_contract_id": contract_id,
-        "title": f"Contratto {contract_id} (manuale)",
-        "contracting_authority": "Da capitolato",
-        "deadline": "Da capitolato",
-        "value_eur": 0,
-        "cpv_codes": [],
-        "canonical_url": f"https://www.anticorruzione.it/contract/{contract_id}",
-        "sources": ["manual"],
-        "consensus_score": 1.0,
-    }
-
-
 def run() -> None:
     """Run the BandAI procurement pipeline via CrewAI Flow."""
     args = _parse_args()
+
+    if args.mode == "report":
+        path = write_report()
+        log.info("Report generated: %s", path)
+        print(f"Report generated: {path}")
+        return
 
     # Always validate config, even in dry-run
     _startup_validation()
@@ -107,7 +100,15 @@ def run() -> None:
         state = BandAIState(mode=args.mode)
 
         if args.mode == "propose":
-            state.contracts = [_build_stub_contract(args.contract)]
+            contract = load_contract_from_outputs(args.contract)
+            if contract is None:
+                log.error(
+                    "Contract %s not found in %s. Run `bandai --mode scout` or `bandai --mode full` first.",
+                    args.contract,
+                    OUTPUT_DIR,
+                )
+                sys.exit(1)
+            state.contracts = [contract]
 
         flow = BandAIFlow()
         flow.kickoff(inputs=state.model_dump())
@@ -117,6 +118,18 @@ def run() -> None:
     except Exception:
         log.exception("BandAI pipeline failed")
         raise
+
+
+def kickoff() -> None:
+    """CrewAI Flow-compatible kickoff entry point."""
+    run()
+
+
+def plot() -> None:
+    """Generate the CrewAI flow visualization."""
+    flow = BandAIFlow()
+    flow.plot("bandai_flow")
+    print("Flow plot generated: bandai_flow.html")
 
 
 def train() -> None:
@@ -139,9 +152,16 @@ def run_pytest() -> None:
     _run_command(["pytest", "tests/", "-v", *sys.argv[1:]])
 
 
-def run_with_trigger() -> None:
-    """Run the BandAI pipeline from an external trigger (webhook/API)."""
-    run()
+def install_chromium() -> None:
+    """Install the Chromium browser required by Playwright crawler tools."""
+    _run_command([sys.executable, "-m", "playwright", "install", "chromium"])
+
+
+def report() -> None:
+    """Generate the stakeholder HTML report from output JSON files."""
+    path = write_report()
+    log.info("Report generated: %s", path)
+    print(f"Report generated: {path}")
 
 
 if __name__ == "__main__":

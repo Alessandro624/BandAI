@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 import tempfile
 import types
@@ -601,6 +602,37 @@ class TestIO:
         )
         assert path.exists()
         path.unlink()
+
+    def test_load_contract_from_outputs_reads_scout_results(self, tmp_path: Path) -> None:
+        from bandai.io import load_contract_from_outputs
+
+        contract = {
+            "canonical_contract_id": "363340-2026",
+            "title": "Italy - Research services",
+            "contracting_authority": "European Commission",
+            "deadline": "2026-07-03T12:00:59",
+            "value_eur": 1100000.0,
+            "cpv_codes": ["73110000"],
+            "sources": ["TED"],
+            "consensus_score": 0.9,
+            "canonical_url": "https://ted.europa.eu/en/notice/-/detail/363340-2026",
+        }
+        (tmp_path / "01_scout_results.json").write_text(
+            json.dumps({"contracts": [contract]}),
+            encoding="utf-8",
+        )
+
+        assert load_contract_from_outputs("363340-2026", output_dir=tmp_path) == contract
+
+    def test_load_contract_from_outputs_returns_none_when_missing(self, tmp_path: Path) -> None:
+        from bandai.io import load_contract_from_outputs
+
+        (tmp_path / "01_scout_results.json").write_text(
+            json.dumps({"contracts": []}),
+            encoding="utf-8",
+        )
+
+        assert load_contract_from_outputs("missing", output_dir=tmp_path) is None
 
 
 # Reload portals tests

@@ -3,7 +3,8 @@
   "vat_number": "IT12345678901",
   "ateco_codes": [
     "62.01.09",
-    "62.02.00"
+    "62.02.00",
+    "72.20.00"
   ],
   "certifications": [
     "ISO 9001:2015",
@@ -36,17 +37,57 @@
       "title": "Data Analysis for Municipal Services",
       "value_eur": 80000.0,
       "cpv_codes": [
-        "72200000"
+        "72200000",
+        "72312100",
+        "79311400"
       ],
       "year": 2021,
       "authority": "Comune di Milano",
       "topics": [
         "data analysis",
-        "public services"
+        "public services",
+        "statistical reporting"
+      ]
+    },
+    {
+      "title": "Applied Socio-Economic Data Analysis for Public Policy",
+      "value_eur": 220000.0,
+      "cpv_codes": [
+        "73110000",
+        "79311400",
+        "79315000",
+        "72312100"
+      ],
+      "year": 2024,
+      "authority": "Universita degli Studi di Cagliari",
+      "topics": [
+        "research services",
+        "inequality indicators",
+        "survey data analysis",
+        "public policy evaluation"
       ]
     }
   ],
   "departments": {
+    "Data Research & Policy Analytics": {
+      "capabilities": [
+        "Applied research design for public-sector socio-economic studies",
+        "Statistical analysis of administrative, survey and open data sources",
+        "Indicator design, reproducible reporting and policy evaluation dashboards"
+      ],
+      "certifications": [
+        "ISO 9001:2015",
+        "ISO 27001:2022"
+      ],
+      "case_studies": [
+        "Osservatorio indicatori territoriali Universita di Cagliari (2024) - EUR 220k, inequality and public-service access analysis"
+      ],
+      "kpis": {
+        "datasets_integrated": 18,
+        "avg_report_delivery_weeks": 6,
+        "reproducible_analysis_percent": 100
+      }
+    },
     "Cloud Infrastructure": {
       "capabilities": [
         "Design and management of multi-cloud environments (AWS, Azure, GCP)",

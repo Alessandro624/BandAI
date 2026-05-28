@@ -16,9 +16,9 @@ The Scout crew automatically creates a Crawler Agent for each portal. No code ch
 
 **Reliability guidelines:**
 
-- 0.90–1.00 - Official national/EU sources (ANAC, TED)
-- 0.75–0.89 - Regional procurement platforms (MePA, Sardegna CAT)
-- 0.50–0.74 - Municipal or niche portals
+- 0.90-1.00 - Official national/EU sources (ANAC, TED)
+- 0.75-0.89 - Regional procurement platforms (MePA, Sardegna CAT)
+- 0.50-0.74 - Municipal or niche portals
 
 The Resolution Agent uses reliability as a weighting factor in consensus polling. A portal with 0.70 contributes less to the canonical record than one with 1.00.
 
@@ -142,7 +142,7 @@ class RAGSearchTool(BaseTool):
 ```python
 agent = Agent(
     ...,
-    tools=[RAGSearchTool(), ContractDetailTool()],
+    tools=[RAGSearchTool()],
 )
 ```
 

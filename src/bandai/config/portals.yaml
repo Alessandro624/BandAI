@@ -11,19 +11,60 @@
 # automatically by the Scout crew on the next run.
 
 portals:
-  - name: "ANAC / Simog"
-    base_url: "https://www.anticorruzione.it/-/bandi-di-gara"
-    reliability: 1.00
+  # - name: "ANAC"
+  #   info: "ANAC / Simog"
+  #   base_url: "https://www.anticorruzione.it/-/bandi-di-gara"
+  #   reliability: 1.00
 
-  - name: "TED (EU)"
+  #   discovery:
+  #     base_search_url: "https://pubblicitalegale.anticorruzione.it/bandi"
+  #     elements_per_page: 10
+  #     list_wrapper_selector:
+  #       type: "css"
+  #       text: "app-bandi-di-gara div:has( app-bando-di-gara-preview)"
+  #     next_page_selector:
+  #       type: "css"
+  #       text: ".pagination .page-item:last-child"
+  #     actions_to_perform: []
+
+  #   extraction:
+  #     base_resource_url: "https://pubblicitalegale.anticorruzione.it/bandi"
+  #     main_content_selector: 
+  #       type: "css"
+  #       text: "app-bando-di-gara-detail"
+
+  - name: "TED"
+    info: "TED (EU)"
     base_url: "https://www.ted.europa.eu/en/search/result"
     reliability: 0.90
     country_filter: "IT"
+        
+    discovery:
+      base_search_url: "https://ted.europa.eu/en/search/result?FT=Italy"
+      elements_per_page: 50
+      list_wrapper_selector:
+        type: "css"
+        text: "table:has( thead)"
+      next_page_selector:
+        type: "aria-label"
+        text: "Go to the next page"
+      actions_to_perform: []
+        # - selector: 
+        #     type: "css"
+        #     text: "th:has( #deadline-column-id)"
+        #   action_type: "click"
+        #   wait_after_action: "networkidle"
+    
+    extraction:
+      base_resource_url: https://ted.europa.eu/
+      main_content_selector: 
+        type: "css"
+        text: "#notice-accordion"
 
-  - name: "MePA"
-    base_url: "https://www.acquistinretepa.it/opencms/opencms/main/pa/"
-    reliability: 0.85
+  # - name: "MePA"
+  #   base_url: "https://www.acquistinretepa.it/opencms/opencms/main/pa/"
+  #   reliability: 0.85
 
-  - name: "Sardegna CAT"
-    base_url: "https://www.sardegacat.it/eprocurement/createWorkspace.do"
-    reliability: 0.75
+  # - name: "Sardegna CAT"
+  #   base_url: "https://www.sardegacat.it/eprocurement/createWorkspace.do"
+  #   reliability: 0.75

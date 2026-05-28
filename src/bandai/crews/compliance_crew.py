@@ -14,7 +14,6 @@ from bandai.models import (
     ComplianceVerdict,
     load_company_profile,
 )
-from bandai.tools.crawler_tools import ComplianceCheckerTool
 from bandai.utils import load_yaml_config
 
 log = logging.getLogger(__name__)
@@ -49,7 +48,6 @@ class ComplianceCrew:
             role=ac["advocate"]["role"],
             goal=ac["advocate"]["goal"],
             backstory=ac["advocate"]["backstory"],
-            tools=[ComplianceCheckerTool()],
             llm=get_llm(),
             verbose=True,
             max_retry_limit=2,
@@ -67,7 +65,6 @@ class ComplianceCrew:
             role=ac["auditor"]["role"],
             goal=ac["auditor"]["goal"],
             backstory=ac["auditor"]["backstory"],
-            tools=[ComplianceCheckerTool()],
             llm=get_llm(),
             verbose=True,
             max_retry_limit=2,

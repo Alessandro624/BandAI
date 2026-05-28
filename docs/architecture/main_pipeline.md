@@ -9,6 +9,7 @@ BandAI runs a three-phase procurement pipeline orchestrated by a CrewAI Flow. Th
 | `full` | Scout -> Compliance -> Proposal | Preferences + conditional review | Complete end-to-end run |
 | `scout` | Scout only | Preferences | Quick opportunity discovery |
 | `propose` | Compliance -> Proposal | Conditional review | Single known contract, skip scouting |
+| `report` | Report generation only | None | Stakeholder review of existing outputs |
 
 Mode is set via `--mode` flag or by calling `BandAIState(mode=...)`.
 
@@ -16,7 +17,9 @@ Mode is set via `--mode` flag or by calling `BandAIState(mode=...)`.
 
 `main.py` is a thin wrapper. It validates configuration (provider, API key, knowledge file, portals), parses CLI args, prepares the initial `BandAIState`, then delegates to `BandAIFlow.kickoff(inputs=state.model_dump())`.
 
-For `--mode propose`, the wrapper injects a stub contract into the state before kickoff so the flow can start directly from compliance without running scouting.
+For `--mode propose`, the wrapper loads the selected contract from `output/01_scout_results.json` before kickoff so the flow can start directly from compliance without running scouting.
+
+For `--mode report`, the wrapper skips CrewAI entirely and generates `output/report.html` from the JSON artifacts already present in `output/`.
 
 ```text
 main.py  ->  _startup_validation()  ->  BandAIState(...)  ->  BandAIFlow().kickoff(inputs=state.model_dump())
@@ -101,6 +104,7 @@ All artifacts land in `output/`:
 | `02_compliance_{nn}_{id}.json`  | Individual compliance verdicts       |
 | `02_no_go_review_required.json` | Consolidated NO-GO contracts         |
 | `03_proposal_{nn}_{id}.json`    | Final proposal per contract          |
+| `report.html`                   | Stakeholder-ready HTML summary       |
 
 ## Logging
 

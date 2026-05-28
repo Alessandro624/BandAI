@@ -17,6 +17,13 @@ from .knowledge import (
     parse_company_profile,
 )
 
+from .models import (
+    AccessMode, Status,
+
+    TenderOverview, DiscoveryResult,
+    TenderInfo, ContractingAuthority
+)
+
 __all__ = [
     # Pipeline models
     "RawContract",
@@ -34,4 +41,9 @@ __all__ = [
     "clear_profile_cache",
     "load_company_profile",
     "parse_company_profile",
+
+    ## Discovery + Extration Models
+    "AccessMode", "Status",
+    "TenderOverview", "DiscoveryResult",
+    "TenderInfo", "ContractingAuthority"
 ]

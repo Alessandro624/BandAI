@@ -20,7 +20,7 @@ How the system is built. Start here for the structural overview.
 | [main_pipeline.md](architecture/main_pipeline.md) | Flow state machine, execution modes (`full`/`scout`/`propose`), entry points, human interaction points, output files, logging |
 | [crews.md](architecture/crews.md) | ScoutCrew, ComplianceCrew, ProposalCrew - agents, task chains, build signatures, shared config |
 | [models.md](architecture/models.md) | All 11 Pydantic models: knowledge models, scouting models, compliance models, proposal models |
-| [tools.md](architecture/tools.md) | 4 custom CrewAI tools: TenderCrawlerTool, ContractDetailTool, ComplianceCheckerTool, ProposalWriterTool |
+| [tools.md](architecture/tools.md) | Runtime CrewAI tools: Playwright discovery/detail loaders and ProposalWriterTool |
 | [configuration.md](architecture/configuration.md) | Environment variables, LLM providers, portal YAML, startup validation, NO-GO keywords |
 
 ## Guides

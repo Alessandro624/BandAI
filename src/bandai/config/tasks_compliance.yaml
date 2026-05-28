@@ -10,10 +10,13 @@ advocate_task:
       Turnover (3y)   : {turnover}
       Past contracts  : {past_contracts}
 
-    Instructions: 1. List every EXPLICIT requirement in the tender. 2. For each,
-    state: MEETS / POTENTIALLY MEETS (with caveats) / DOES NOT MEET. 3. For
-    "potentially" items, propose a concrete mitigation. 4. Assign
-    confidence_score (0-1) and overall_sentiment. 5. Return a JSON object
+    Instructions: 1. Use only the CONTRACT text and COMPANY PROFILE above.
+    Do not invent missing tender requirements. 2. List every EXPLICIT
+    requirement in the tender. If the contract summary is insufficient, say so
+    in summary and keep confidence_score low. 3. For each requirement, state:
+    MEETS / POTENTIALLY MEETS (with caveats) / DOES NOT MEET. 4. For
+    "potentially" items, propose a concrete mitigation. 5. Assign
+    confidence_score (0-1) and overall_sentiment. 6. Return a JSON object
     matching the AdvocateAnalysis schema.
   expected_output: >
     A valid JSON object: requirements_met, requirements_potentially_met,
@@ -27,12 +30,13 @@ auditor_task:
 
     CONTRACT: {contract_summary}
 
-    Instructions: 1. Review each Advocate claim. 2. HARD BLOCKERS: requirements
-    the company cannot meet before the deadline. 3. SOFT RISKS: uncertain or
-    third-party-dependent requirements. 4. ADVOCATE_OVERESTIMATES: legally or
-    factually wrong Advocate claims. 5. Assign risk_score (0 = no risk, 1 =
-    certain failure). 6. Return a JSON object matching the AuditorChallenge
-    schema.
+    Instructions: 1. Use only the CONTRACT text, COMPANY PROFILE and Advocate
+    output in context. Do not invent missing requirements. 2. Review each
+    Advocate claim. 3. HARD BLOCKERS: requirements the company cannot meet
+    before the deadline. 4. SOFT RISKS: uncertain or third-party-dependent
+    requirements. 5. ADVOCATE_OVERESTIMATES: legally or factually wrong
+    Advocate claims. 6. Assign risk_score (0 = no risk, 1 = certain failure).
+    7. Return a JSON object matching the AuditorChallenge schema.
   expected_output: >
     A valid JSON object: hard_blockers, soft_risks, advocate_overestimates,
     overall_sentiment, risk_score, summary.
