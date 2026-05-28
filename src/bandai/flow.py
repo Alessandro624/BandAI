@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Callable
+from typing import Callable, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
 from crewai.flow.flow import Flow, listen, router, start  # type: ignore
@@ -116,7 +116,7 @@ class BandAIFlow(Flow[BandAIState]):
             self.state.user_preferences = "No specific preferences - use standard CPV filters."
 
     @router(begin)
-    def route_from_begin(self) -> str:
+    def route_from_begin(self) -> Literal["scout", "skip_scout"]:
         """Decide next step after scouting."""
         return "scout" if self.state.mode in ("full", "scout") else "skip_scout"
 
@@ -138,8 +138,14 @@ class BandAIFlow(Flow[BandAIState]):
                 resolved = TypeAdapter(list[ResolvedContract]).validate_python(parsed)
                 contracts = [contract.model_dump() for contract in resolved]
             except Exception:
-                log.error("Scout output was not parseable. Raw:\n%s", raw)
-                contracts = []
+                pydantic_output = getattr(final_task.output, "pydantic", None)
+                try:
+                    parsed = [_normalize_resolved_contract_dict(contract if isinstance(contract, dict) else contract.model_dump()) for contract in (pydantic_output or [])]
+                    resolved = TypeAdapter(list[ResolvedContract]).validate_python(parsed)
+                    contracts = [contract.model_dump() for contract in resolved]
+                except Exception:
+                    log.error("Scout output was not parseable. Raw:\n%s", raw)
+                    contracts = []
 
             self.state.contracts = contracts
             self.state.total_contracts = len(contracts)
@@ -150,7 +156,7 @@ class BandAIFlow(Flow[BandAIState]):
             self.state.contracts = []
 
     @router(run_scouting)
-    def route_after_scout(self) -> str:
+    def route_after_scout(self) -> Literal["end_scout", "start_compliance"]:
         """Decide next step after scouting."""
         return "end_scout" if self.state.mode == "scout" else "start_compliance"
 
@@ -169,7 +175,7 @@ class BandAIFlow(Flow[BandAIState]):
         pass
 
     @router(skip_to_compliance)
-    def route_skip(self) -> str:
+    def route_skip(self) -> Literal["start_compliance"]:
         return "start_compliance"
 
     # Phase 2: Compliance
@@ -184,7 +190,7 @@ class BandAIFlow(Flow[BandAIState]):
         self.state.current_contract_index = 0
 
     @router(init_compliance)
-    def route_after_init(self) -> str:
+    def route_after_init(self) -> Literal["process_next_contract"]:
         return "process_next_contract"
 
     @listen("process_next_contract")
@@ -221,7 +227,7 @@ class BandAIFlow(Flow[BandAIState]):
         log.info("  [%d/%d] %s", idx + 1, len(contracts), contract.get("title", "?"))
 
     @router(process_next_contract_func)
-    def route_process_contract(self) -> str:
+    def route_process_contract(self) -> Literal["compliance_done", "run_compliance_crew"]:
         """All done, or run compliance on the next contract?"""
         if self.state.current_contract_index >= len(self.state.contracts):
             return "compliance_done"
@@ -251,7 +257,7 @@ class BandAIFlow(Flow[BandAIState]):
             self.state.current_verdict = None
 
     @router(run_compliance_crew_func)
-    def route_verdict(self) -> str:
+    def route_verdict(self) -> Literal["handle_conditional_go", "process_next_contract"]:
         """Route based on the compliance verdict."""
         if self.state.current_verdict is None:
             self.state.current_contract_index += 1
@@ -361,7 +367,7 @@ class BandAIFlow(Flow[BandAIState]):
         self.state.current_contract_index += 1
 
     @router(handle_conditional_go_func)
-    def route_after_conditional(self) -> str:
+    def route_after_conditional(self) -> Literal["handle_conditional_go", "process_next_contract"]:
         """Loop back for another review iteration, or move on."""
         if self.state.current_verdict is not None:
             verdict = ComplianceVerdict(**self.state.current_verdict)
@@ -381,7 +387,7 @@ class BandAIFlow(Flow[BandAIState]):
         )
 
     @router(after_compliance)
-    def route_after_compliance(self) -> str:
+    def route_after_compliance(self) -> Literal["start_proposals"]:
         return "start_proposals"
 
     # Phase 3: Proposals
