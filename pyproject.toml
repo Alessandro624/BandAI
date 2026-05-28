@@ -23,13 +23,13 @@ dev = ["pytest>=8.0.0", "pytest-cov>=5.0.0"]
 
 [project.scripts]
 bandai = "bandai.main:run"
-run_crew = "bandai.main:run"
+bandai_report = "bandai.main:report"
+kickoff = "bandai.main:kickoff"
+plot = "bandai.main:plot"
 install_chromium = "bandai.main:install_chromium"
 train = "bandai.main:train"
 replay = "bandai.main:replay"
 test = "bandai.main:test"
-run_with_trigger = "bandai.main:run_with_trigger"
-kickoff = "bandai.main:run"
 pytest_unit = "bandai.main:run_pytest"
 
 [build-system]
