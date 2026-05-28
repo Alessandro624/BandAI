@@ -11,6 +11,7 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 from bandai.config import validate_config, get_active_provider, validate_portals
 from bandai.flow import BandAIFlow, BandAIState
 from bandai.io import OUTPUT_DIR, load_contract_from_outputs
+from bandai.report import write_report
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +25,7 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="BandAI - Italian SME Procurement Agent")
     p.add_argument(
         "--mode",
-        choices=["full", "scout", "propose"],
+        choices=["full", "scout", "propose", "report"],
         default="full",
         help="Pipeline mode (default: full)",
     )
@@ -75,6 +76,12 @@ def run() -> None:
     """Run the BandAI procurement pipeline via CrewAI Flow."""
     args = _parse_args()
 
+    if args.mode == "report":
+        path = write_report()
+        log.info("Report generated: %s", path)
+        print(f"Report generated: {path}")
+        return
+
     # Always validate config, even in dry-run
     _startup_validation()
 
@@ -113,6 +120,18 @@ def run() -> None:
         raise
 
 
+def kickoff() -> None:
+    """CrewAI Flow-compatible kickoff entry point."""
+    run()
+
+
+def plot() -> None:
+    """Generate the CrewAI flow visualization."""
+    flow = BandAIFlow()
+    flow.plot("bandai_flow")
+    print("Flow plot generated: bandai_flow.html")
+
+
 def train() -> None:
     """Run CrewAI training through the CLI."""
     _run_command(["crewai", "train", *sys.argv[1:]])
@@ -138,9 +157,11 @@ def install_chromium() -> None:
     _run_command([sys.executable, "-m", "playwright", "install", "chromium"])
 
 
-def run_with_trigger() -> None:
-    """Run the BandAI pipeline from an external trigger (webhook/API)."""
-    run()
+def report() -> None:
+    """Generate the stakeholder HTML report from output JSON files."""
+    path = write_report()
+    log.info("Report generated: %s", path)
+    print(f"Report generated: {path}")
 
 
 if __name__ == "__main__":
