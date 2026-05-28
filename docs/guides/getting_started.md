@@ -84,6 +84,14 @@ bandai --mode propose --contract GD-2026-00123
 
 Skips scouting. Loads the contract with the given ID from `output/01_scout_results.json` and runs compliance + proposal phases.
 
+### Report mode
+
+```bash
+bandai --mode report
+```
+
+Generates `output/report.html` from the current output JSON files. Use it after `full`, `scout`, or `propose` runs to review results in a browser.
+
 ### Dry run
 
 ```bash
@@ -102,6 +110,7 @@ output/
 ├── 02_compliance_01_GD-2026-00123.json
 ├── 02_no_go_review_required.json
 ├── 03_proposal_01_GD-2026-00123.json
+├── report.html
 └── proposal_output.md
 ```
 
@@ -122,6 +131,7 @@ uv run pytest_unit
 | `bandai`                | Run full pipeline                             |
 | `bandai --mode scout`   | Scout-only mode                               |
 | `bandai --mode propose --contract ID` | Propose mode for known contract |
+| `bandai --mode report`  | Generate stakeholder HTML report              |
 | `bandai --dry-run`      | Validate config without LLM calls             |
 | `crewai test`           | Run CrewAI evaluation (2 iterations)          |
 | `crewai train -n 5`     | Train crew with 5 iterations                  |

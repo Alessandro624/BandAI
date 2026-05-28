@@ -32,6 +32,18 @@ bandai --mode propose --contract GD-2026-00123
 
 `--mode propose` requires `--contract`. Without it, or if the contract ID is not present in the previous scout output, exits with an error.
 
+### `bandai --mode report`
+
+Generates a stakeholder-ready HTML report from the JSON files already present in `output/`.
+
+```bash
+bandai --mode report
+# or
+bandai_report
+```
+
+Writes `output/report.html`. This mode does not call LLMs and does not require provider/API validation.
+
 ### `bandai --dry-run`
 
 Validates configuration without making LLM calls. Checks:
@@ -51,13 +63,13 @@ Exits 0 on success, 1 on any validation failure.
 
 The following commands are declared in `pyproject.toml` and point to the same runtime entry points used by the CLI:
 
-### `run_crew`
+### `kickoff`
 
-Alias of `bandai`.
+CrewAI Flow-compatible alias for `bandai`.
 
-### `run_with_trigger`
+### `plot`
 
-Calls the same runtime as `bandai`. Use this when the pipeline is launched by an external trigger such as a webhook.
+CrewAI Flow-compatible script used by `crewai flow plot`.
 
 ### `pytest_unit`
 

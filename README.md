@@ -65,7 +65,7 @@ Quick links:
 | [Characters](docs/guides/characters.md) | Agent personas, roles, behavioral traits |
 | [Flow State Machine](docs/reference/flow_state_machine.md) | Every transition mapped with routing logic |
 | [Knowledge System](docs/reference/knowledge_system.md) | StringKnowledgeSource, chunking, RAG pipeline |
-| [CLI Reference](docs/reference/cli_reference.md) | `bandai`, `bandai --dry-run`, `run_with_trigger`, CrewAI utilities |
+| [CLI Reference](docs/reference/cli_reference.md) | `bandai`, `bandai --mode report`, `bandai --dry-run`, CrewAI utilities |
 | [Testing](docs/testing.md) | Test strategy, layers, commands, mocking, fixtures |
 
 ---
@@ -163,11 +163,12 @@ bandai --mode scout
 # Propose for a known contract (skip scouting)
 bandai --mode propose --contract GD-2026-00123
 
+# Generate stakeholder HTML report from output/
+bandai --mode report
+
 # Validate config without LLM calls
 bandai --dry-run
 ```
-
-The same runtime is also exposed as `run_with_trigger` for webhook or API-driven execution.
 
 ### Tests
 
