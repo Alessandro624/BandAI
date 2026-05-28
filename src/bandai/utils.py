@@ -90,6 +90,7 @@ def _extract_array_from_wrapper(value: Any) -> list | None:
 def extract_json_array_text(raw: str) -> str:
     """Extract the first complete JSON array text from a raw LLM output."""
     decoder = json.JSONDecoder()
+    stripped = raw.strip()
 
     for start, char in enumerate(raw):
         if char not in "[{":
@@ -103,6 +104,9 @@ def extract_json_array_text(raw: str) -> str:
         array = _extract_array_from_wrapper(parsed)
         if array is not None:
             return json.dumps(array, ensure_ascii=False)
+
+    if stripped.startswith(("[", "{")):
+        json.loads(stripped)
 
     raise ValueError("No JSON array found in the input.")
 

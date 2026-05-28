@@ -134,6 +134,12 @@ def validate_resolved_contract_array(
                 "sources=[portal and/or url]; consensus_score=portal reliability weight.",
             )
 
+        if _contains_placeholder(contract):
+            return (
+                False,
+                f"Item {index} contains placeholder/example values such as 'string' or 'code1'. "
+                "Use only real values extracted from TenderInfo context; if unavailable use the configured fallback values.",
+            )
         if not isinstance(contract.get("cpv_codes"), list):
             return (False, f"Item {index} field cpv_codes must be a list, never null.")
         if isinstance(contract.get("contracting_authority"), dict):
@@ -148,12 +154,6 @@ def validate_resolved_contract_array(
             return (False, f"Item {index} field sources must be a non-empty list.")
         if not isinstance(contract.get("consensus_score"), (int, float)):
             return (False, f"Item {index} field consensus_score must be a number.")
-        if _contains_placeholder(contract):
-            return (
-                False,
-                f"Item {index} contains placeholder/example values such as 'string' or 'code1'. "
-                "Use only real values extracted from TenderInfo context; if unavailable use the configured fallback values.",
-            )
 
     return (True, payload)
 
